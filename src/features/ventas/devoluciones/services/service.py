@@ -7,12 +7,13 @@ from src.shared.services.models import (
     Devolucion, DevolucionDetalle, Venta, VentaXProducto, Usuario,
     Producto, CreditoCliente, MovimientoCredito
 )
+from src.shared.services.notificaciones_utils import notificar, descartar_notificacion
 from .schemas import DevolucionCreate, DevolucionResolucion, DevolucionUpdate
 
-# ── Estados de devoluciones (no dependen de la tabla Estados compartida) ──────
-ESTADO_PENDIENTE = 1
-ESTADO_APROBADA  = 2
-ESTADO_RECHAZADA = 3
+# Estados globales (tabla Estados)
+ESTADO_PENDIENTE = 3
+ESTADO_APROBADA  = 6
+ESTADO_RECHAZADA = 7
 
 _ESTADO_LABELS = {
     ESTADO_PENDIENTE: "Pendiente",
@@ -20,8 +21,8 @@ _ESTADO_LABELS = {
     ESTADO_RECHAZADA: "Rechazada",
 }
 
-# Estado de venta que permite devolucion
-VENTA_ENTREGADA = 4
+# Estado de venta que permite devolución
+VENTA_ENTREGADA = 8
 
 
 def _formato_devolucion(dev: Devolucion, db: Session) -> dict:
@@ -294,7 +295,7 @@ def resolver_devolucion(db: Session, id_devolucion: int, datos: DevolucionResolu
     if datos.Estado not in {ESTADO_APROBADA, ESTADO_RECHAZADA}:
         raise HTTPException(
             status_code=400,
-            detail="Estado inválido. Use 2 (Aprobada) o 3 (Rechazada)"
+            detail="Estado inválido. Use 6 (Aprobada) o 7 (Rechazada)"
         )
 
     dev = db.query(Devolucion).filter(

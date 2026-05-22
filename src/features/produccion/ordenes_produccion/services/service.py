@@ -3,7 +3,36 @@ from fastapi import HTTPException
 from decimal import Decimal
 
 from src.shared.services.models import OrdenProduccion, Producto, Insumo, FichaTecnica, Estado
+from src.shared.services.notificaciones_utils import notificar_stock_insumo, notificar_stock_producto
 from .schemas import OrdenCreate, OrdenUpdate
+
+
+ESTADO_PENDIENTE  = 1
+ESTADO_EN_PROCESO = 13
+ESTADO_COMPLETADA = 11
+ESTADO_CANCELADA  = 5
+
+
+def _actualizar_estado_insumo(insumo: Insumo) -> None:
+    stock  = insumo.Stock_Actual or 0
+    minimo = insumo.Stock_Minimo or 0
+    if stock == 0:
+        insumo.Estado = 15
+    elif stock <= minimo:
+        insumo.Estado = 14
+    else:
+        insumo.Estado = 1
+
+
+def _actualizar_estado_producto(producto: Producto) -> None:
+    stock  = producto.Stock or 0
+    minimo = getattr(producto, "Stock_Minimo", 0) or 0
+    if stock == 0:
+        producto.Estado = 15
+    elif stock <= minimo:
+        producto.Estado = 14
+    else:
+        producto.Estado = 1
 
 
 def _label_estado(db: Session, id_estado: int) -> str:
@@ -120,9 +149,6 @@ def crear_orden(db: Session, datos: OrdenCreate) -> dict:
 
     costo = _calcular_costo(db, datos.ID_Insumo, datos.Cantidad)
 
-    # Estado inicial: Pendiente (ID quemado en BD, ajusta si difiere)
-    ESTADO_PENDIENTE = 1
-
     nueva = OrdenProduccion(
         ID_Producto   = datos.ID_Producto,
         ID_Insumo     = datos.ID_Insumo,
@@ -160,12 +186,44 @@ def editar_orden(db: Session, id_orden: int, datos: OrdenUpdate) -> dict:
 
 
 def cambiar_estado(db: Session, id_orden: int, nuevo_estado: int) -> dict:
-    """Cambia el estado de la orden."""
     orden = db.query(OrdenProduccion).filter(
         OrdenProduccion.ID_Orden_Produccion == id_orden
     ).first()
     if not orden:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
+
+    # Al iniciar (13=En proceso): validar ficha, validar stock e insumo, descontar
+    if nuevo_estado == ESTADO_EN_PROCESO and orden.Estado == ESTADO_PENDIENTE:
+        if not orden.ID_Ficha:
+            raise HTTPException(
+                status_code=400,
+                detail="El producto debe tener una ficha técnica asignada antes de iniciar la producción"
+            )
+        insumo = db.query(Insumo).filter(Insumo.ID_Insumo == orden.ID_Insumo).first()
+        if not insumo:
+            raise HTTPException(status_code=404, detail="Insumo no encontrado")
+        if (insumo.Stock_Actual or 0) < orden.Cantidad:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Stock insuficiente del insumo '{insumo.Nombre}': disponible {insumo.Stock_Actual or 0}"
+            )
+        insumo.Stock_Actual -= orden.Cantidad
+        _actualizar_estado_insumo(insumo)
+
+    # Al completar (11=Completada): incrementar stock del producto
+    elif nuevo_estado == ESTADO_COMPLETADA and orden.Estado == ESTADO_EN_PROCESO:
+        producto = db.query(Producto).filter(Producto.ID_Producto == orden.ID_Producto).first()
+        if not producto:
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+        producto.Stock = (producto.Stock or 0) + orden.Cantidad
+        _actualizar_estado_producto(producto)
+
+    # Al cancelar (5): restaurar insumo si la orden estaba en proceso
+    elif nuevo_estado == ESTADO_CANCELADA and orden.Estado == ESTADO_EN_PROCESO:
+        insumo = db.query(Insumo).filter(Insumo.ID_Insumo == orden.ID_Insumo).first()
+        if insumo:
+            insumo.Stock_Actual = (insumo.Stock_Actual or 0) + orden.Cantidad
+            _actualizar_estado_insumo(insumo)
 
     orden.Estado = nuevo_estado
     db.commit()

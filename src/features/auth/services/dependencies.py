@@ -94,6 +94,10 @@ def requiere_permiso(nombre_permiso: str):
         # Obtener el ID_Rol según el tipo de usuario
         if tipo == "empleado":
             id_rol = registro.ID_Rol
+
+            # ── Bypass total para Admin ──
+            if id_rol == 1:
+                return actual
         else:
             # Clientes: buscar su rol en Usuario_x_Rol
             from src.shared.services.models import UsuarioXRol

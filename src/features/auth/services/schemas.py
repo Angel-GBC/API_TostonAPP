@@ -89,3 +89,16 @@ class CambiarContrasenaInput(BaseModel):
 
 class CambiarContrasenaResponse(BaseModel):
     mensaje: str
+
+
+# ── Actualizar perfil ──
+class PerfilUpdate(BaseModel):
+    Telefono:     Optional[str] = None
+    Direccion:    Optional[str] = None
+    Municipio:    Optional[str] = None
+    Departamento: Optional[str] = None
+
+
+# ── Foto de perfil (Cloudinary) ──
+class FotoUrlInput(BaseModel):
+    url: str = Field(example="https://res.cloudinary.com/demo/image/upload/sample.jpg")

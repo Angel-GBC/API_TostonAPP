@@ -4,6 +4,11 @@ from datetime import datetime
 from decimal import Decimal
 
 
+# ── URLs de imágenes desde Cloudinary ──
+class ImagenesUrlInput(BaseModel):
+    urls: list[str]
+
+
 # ── Ficha técnica opcional al crear producto ──
 class FichaTecnicaInput(BaseModel):
     Version:       Optional[str] = None

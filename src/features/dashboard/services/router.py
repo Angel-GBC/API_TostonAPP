@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from src.shared.services.database import get_db
-from src.features.auth.services.dependencies import solo_empleados
+from src.features.auth.services.dependencies import requiere_permiso
 from .schemas import DashboardResponse
 from .service import obtener_dashboard
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 def vista_general(
     periodo: str     = Query("hoy", description="hoy | semana | mes"),
     db:      Session = Depends(get_db),
-    _:       dict    = Depends(solo_empleados)
+    _:       dict    = Depends(requiere_permiso("ver_dashboard")),
 ):
     """
     Retorna toda la información del dashboard en una sola llamada.

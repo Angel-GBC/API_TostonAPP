@@ -461,6 +461,45 @@ class MovimientoCredito(Base):
 
 
 # ─────────────────────────────────────────
+# SALIDAS (daños, vencimientos, ajustes)
+# ─────────────────────────────────────────
+
+class Salida(Base):
+    __tablename__ = "Salidas"
+
+    ID_Salida   = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    Tipo        = Column(String(20))          # 'vencimiento','daño','ajuste','consumo','devolución'
+    ID_Insumo   = Column(Integer, ForeignKey("Insumos.ID_Insumo"),    nullable=True)
+    ID_Producto = Column(Integer, ForeignKey("Productos.ID_Producto"), nullable=True)
+    Cantidad    = Column(Integer)
+    Motivo      = Column(Text, nullable=True)
+    ID_Empleado = Column(Integer, ForeignKey("Empleados.ID_Empleado"), nullable=True)
+    Fecha       = Column(DateTime)
+    Estado      = Column(Integer, ForeignKey("Estados.ID_Estados"))
+
+    insumo   = relationship("Insumo",   foreign_keys=[ID_Insumo])
+    producto = relationship("Producto", foreign_keys=[ID_Producto])
+    empleado = relationship("Empleado", foreign_keys=[ID_Empleado])
+
+
+# ─────────────────────────────────────────
+# NOTIFICACIONES
+# ─────────────────────────────────────────
+
+class Notificacion(Base):
+    __tablename__ = "Notificaciones"
+
+    ID_Notificacion = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    Tipo            = Column(String(30))
+    Titulo          = Column(String(100))
+    Mensaje         = Column(Text, nullable=True)
+    Referencia_ID   = Column(Integer, nullable=True)
+    Ruta            = Column(String(200), nullable=True)
+    Fecha           = Column(DateTime)
+    Leida           = Column(Boolean, default=False)
+
+
+# ─────────────────────────────────────────
 # DESCUENTOS
 # ─────────────────────────────────────────
 

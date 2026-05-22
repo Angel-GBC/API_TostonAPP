@@ -8,7 +8,7 @@ from src.features.auth.services.router import router as auth_router
 from src.features.configuracion.usuarios.services.router       import router as usuarios_router
 from src.features.configuracion.roles.services.router          import router as roles_router
 from src.features.configuracion.notificaciones.services.router import router as notificaciones_router
-from src.features.configuracion.descuentos.services.router     import router as descuentos_router
+from src.features.configuracion.salidas.services.router       import router as salidas_router
 
 # ── Compras ──
 from src.features.compras.insumos.services.router           import router as insumos_router
@@ -40,8 +40,8 @@ app = FastAPI(
 # ── CORS ──
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=["https://frontend-ten-xi-31.vercel.app", "http://localhost:5173"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -53,7 +53,8 @@ app.include_router(auth_router,          prefix=PREFIX)
 app.include_router(usuarios_router,      prefix=PREFIX)
 app.include_router(roles_router,         prefix=PREFIX)
 app.include_router(notificaciones_router, prefix=PREFIX)
-app.include_router(descuentos_router,    prefix=PREFIX)
+app.include_router(salidas_router,        prefix=PREFIX)
+
 app.include_router(insumos_router,       prefix=PREFIX)
 app.include_router(cat_insumos_router,   prefix=PREFIX)
 app.include_router(proveedores_router,   prefix=PREFIX)

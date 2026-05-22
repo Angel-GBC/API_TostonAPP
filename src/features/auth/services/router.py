@@ -1,96 +1,211 @@
-from pydantic import BaseModel, model_validator
-from typing import Optional
-from pydantic import Field
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from src.shared.services.database import get_db
+from src.features.auth.services.dependencies import obtener_usuario_actual
+from .schemas import (
+    LoginInput, TokenResponse, RegistroInput,
+    RecuperarContrasenaInput, RecuperarContrasenaResponse,
+    VerificarCodigoInput, VerificarCodigoResponse,
+    ResetearContrasenaInput, ResetearContrasenaResponse,
+    CambiarContrasenaInput, CambiarContrasenaResponse,
+    PerfilUpdate, FotoUrlInput,
+)
+from .service import (
+    autenticar, crear_token, obtener_nombre_rol,
+    registrar_cliente, solicitar_recuperacion,
+    verificar_codigo_recuperacion, resetear_contrasena,
+    cambiar_contrasena, actualizar_foto_perfil, eliminar_foto_perfil,
+    obtener_mis_permisos,
+)
+
+router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-# ── Login ──
-class LoginInput(BaseModel):
-    correo:     str = Field(example="admin@empresa.com")
-    contrasena: str = Field(example="Admin123@")
+def _formato_perfil(actual: dict) -> dict:
+    registro = actual["registro"]
+    tipo     = actual["tipo"]
+    id_campo = registro.ID_Empleado if tipo == "empleado" else registro.ID_Usuario
+    return {
+        "id":             id_campo,
+        "Nombre":         registro.Nombre,
+        "Apellidos":      registro.Apellidos,
+        "Correo":         registro.Correo,
+        "Cedula":         registro.Cedula,
+        "Tipo_Documento": getattr(registro, "Tipo_Documento", None),
+        "Telefono":       registro.Telefono,
+        "Direccion":      registro.Direccion,
+        "Municipio":      registro.Municipio,
+        "Departamento":   registro.Departamento,
+        "Foto_perfil":    registro.Foto_perfil,
+        "Fecha_creacion": registro.Fecha_creacion,
+        "Estado":         registro.Estado,
+        "tipo":           tipo,
+        "rol":            actual.get("rol"),
+    }
 
 
-# ── Token interno ──
-class TokenData(BaseModel):
-    cedula: Optional[int] = None
-    tipo:   Optional[str] = None
-    rol:    Optional[str] = None
+# ─────────────────────────────────────────
+# AUTH PÚBLICA
+# ─────────────────────────────────────────
+
+@router.post("/login", response_model=TokenResponse)
+def login(datos: LoginInput, db: Session = Depends(get_db)):
+    registro, tipo = autenticar(db, datos.correo, datos.contrasena)
+    if not registro:
+        raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+
+    id_campo = registro.ID_Empleado if tipo == "empleado" else registro.ID_Usuario
+    id_rol   = getattr(registro, "ID_Rol", None)
+
+    if tipo == "usuario":
+        from src.shared.services.models import UsuarioXRol, Rol as RolModel
+        uxr        = db.query(UsuarioXRol).filter(UsuarioXRol.ID_Usuario == registro.ID_Usuario).first()
+        nombre_rol = None
+        if uxr:
+            rol_obj    = db.query(RolModel).filter(RolModel.ID_Rol == uxr.ID_Rol).first()
+            nombre_rol = rol_obj.Rol if rol_obj else None
+    else:
+        nombre_rol = obtener_nombre_rol(db, id_rol) if id_rol else None
+
+    token = crear_token({"id": id_campo, "tipo": tipo, "rol": nombre_rol})
+
+    return TokenResponse(
+        access_token = token,
+        token_type   = "bearer",
+        tipo         = tipo,
+        cedula       = id_campo,
+        nombre       = registro.Nombre,
+        apellidos    = registro.Apellidos,
+        rol          = nombre_rol,
+    )
 
 
-# ── Respuesta de login / registro ──
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type:   str = "bearer"
-    tipo:         str
-    cedula:       int
-    nombre:       str
-    apellidos:    str
-    rol:          Optional[str] = None
+@router.post("/registro", response_model=TokenResponse, status_code=201)
+def registro_cliente(datos: RegistroInput, db: Session = Depends(get_db)):
+    usuario = registrar_cliente(db, datos)
+
+    from src.shared.services.models import UsuarioXRol, Rol as RolModel
+    uxr        = db.query(UsuarioXRol).filter(UsuarioXRol.ID_Usuario == usuario.ID_Usuario).first()
+    nombre_rol = None
+    if uxr:
+        rol_obj    = db.query(RolModel).filter(RolModel.ID_Rol == uxr.ID_Rol).first()
+        nombre_rol = rol_obj.Rol if rol_obj else None
+
+    token = crear_token({"id": usuario.ID_Usuario, "tipo": "usuario", "rol": nombre_rol})
+
+    return TokenResponse(
+        access_token = token,
+        token_type   = "bearer",
+        tipo         = "usuario",
+        cedula       = usuario.ID_Usuario,
+        nombre       = usuario.Nombre,
+        apellidos    = usuario.Apellidos,
+        rol          = nombre_rol,
+    )
 
 
-# ── Registro nuevo cliente ──
-class RegistroInput(BaseModel):
-    Nombre:               str = Field(example="Ana")
-    Apellidos:            str = Field(example="García")
-    Correo:               str = Field(example="ana@gmail.com")
-    Contrasena:           str = Field(example="MiClave123@")
-    Confirmar_contrasena: str = Field(example="MiClave123@")
-
-    @model_validator(mode="after")
-    def validar_contrasenas(self):
-        if self.Contrasena != self.Confirmar_contrasena:
-            raise ValueError("Las contraseñas no coinciden")
-        return self
+@router.post("/recuperar-contrasena", response_model=RecuperarContrasenaResponse)
+def recuperar_contrasena(datos: RecuperarContrasenaInput, db: Session = Depends(get_db)):
+    solicitar_recuperacion(db, datos.correo)
+    return {"mensaje": "Si el correo está registrado, recibirás un código de verificación."}
 
 
-# ── Recuperación de contraseña ──
-class RecuperarContrasenaInput(BaseModel):
-    correo: str = Field(example="admin@empresa.com")
+@router.post("/verificar-codigo", response_model=VerificarCodigoResponse)
+def verificar_codigo(datos: VerificarCodigoInput, db: Session = Depends(get_db)):
+    try:
+        reset_token = verificar_codigo_recuperacion(db, datos.correo, datos.codigo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"reset_token": reset_token, "mensaje": "Código verificado correctamente"}
 
 
-class RecuperarContrasenaResponse(BaseModel):
-    mensaje: str   # NO reset_token — el código va al correo del usuario
+@router.post("/resetear-contrasena", response_model=ResetearContrasenaResponse)
+def resetear_contrasena_endpoint(datos: ResetearContrasenaInput, db: Session = Depends(get_db)):
+    try:
+        resetear_contrasena(db, datos.token, datos.nueva_contrasena)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"mensaje": "Contraseña actualizada correctamente"}
 
 
-# ── Verificar código de 6 dígitos ──
-class VerificarCodigoInput(BaseModel):
-    correo: str = Field(example="usuario@gmail.com")
-    codigo: str = Field(example="482931")
+# ─────────────────────────────────────────
+# PERFIL (requiere token)
+# ─────────────────────────────────────────
+
+@router.get("/me")
+def perfil_basico(actual: dict = Depends(obtener_usuario_actual)):
+    registro = actual["registro"]
+    tipo     = actual["tipo"]
+    id_campo = registro.ID_Empleado if tipo == "empleado" else registro.ID_Usuario
+    return {
+        "id":        id_campo,
+        "nombre":    registro.Nombre,
+        "apellidos": registro.Apellidos,
+        "correo":    registro.Correo,
+        "tipo":      tipo,
+        "rol":       actual.get("rol"),
+    }
 
 
-class VerificarCodigoResponse(BaseModel):
-    reset_token: str
-    mensaje:     str
+@router.get("/perfil")
+def perfil_completo(actual: dict = Depends(obtener_usuario_actual)):
+    return _formato_perfil(actual)
 
 
-# ── Resetear contraseña ──
-class ResetearContrasenaInput(BaseModel):
-    token:            str = Field(example="eyJhbGci...")
-    nueva_contrasena: str = Field(example="NuevaClave123@")
+@router.put("/perfil")
+def actualizar_perfil(
+    datos:  PerfilUpdate,
+    db:     Session = Depends(get_db),
+    actual: dict    = Depends(obtener_usuario_actual),
+):
+    registro = actual["registro"]
+    for campo, valor in datos.model_dump(exclude_none=True).items():
+        setattr(registro, campo, valor)
+    db.commit()
+    db.refresh(registro)
+    return _formato_perfil(actual)
 
 
-class ResetearContrasenaResponse(BaseModel):
-    mensaje: str
+@router.post("/cambiar-contrasena", response_model=CambiarContrasenaResponse)
+def cambiar_password(
+    datos:  CambiarContrasenaInput,
+    db:     Session = Depends(get_db),
+    actual: dict    = Depends(obtener_usuario_actual),
+):
+    try:
+        cambiar_contrasena(db, actual, datos.contrasena_actual, datos.nueva_contrasena)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"mensaje": "Contraseña actualizada correctamente"}
 
 
-# ── Cambio de contraseña (usuario autenticado) ──
-class CambiarContrasenaInput(BaseModel):
-    contrasena_actual:    str = Field(example="MiClave123@")
-    nueva_contrasena:     str = Field(example="NuevaClave456@")
-    confirmar_contrasena: str = Field(example="NuevaClave456@")
-
-    @model_validator(mode="after")
-    def validar_contrasenas(self):
-        if self.nueva_contrasena != self.confirmar_contrasena:
-            raise ValueError("Las contraseñas nuevas no coinciden")
-        if self.contrasena_actual == self.nueva_contrasena:
-            raise ValueError("La nueva contraseña debe ser diferente a la actual")
-        return self
+@router.post("/foto-perfil")
+def subir_foto_perfil(
+    datos:  FotoUrlInput,
+    db:     Session = Depends(get_db),
+    actual: dict    = Depends(obtener_usuario_actual),
+):
+    url = actualizar_foto_perfil(db, actual, datos.url)
+    return {"foto_perfil": url}
 
 
-class CambiarContrasenaResponse(BaseModel):
-    mensaje: str
+@router.delete("/foto-perfil")
+def borrar_foto_perfil(
+    db:     Session = Depends(get_db),
+    actual: dict    = Depends(obtener_usuario_actual),
+):
+    eliminar_foto_perfil(db, actual)
+    return {"mensaje": "Foto de perfil eliminada"}
 
 
-# ── Foto de perfil (Cloudinary) ──
-class FotoUrlInput(BaseModel):
-    url: str = Field(example="https://res.cloudinary.com/demo/image/upload/sample.jpg")
+# ─────────────────────────────────────────
+# PERMISOS
+# ─────────────────────────────────────────
+
+@router.get("/mis-permisos")
+def mis_permisos(
+    db:     Session = Depends(get_db),
+    actual: dict    = Depends(obtener_usuario_actual),
+):
+    return {"permisos": obtener_mis_permisos(db, actual)}

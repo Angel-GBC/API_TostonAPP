@@ -5,6 +5,10 @@ from datetime import datetime
 TIPOS_DOCUMENTO = ["CC", "CE", "NIT", "TI", "PP"]
 
 
+class FotoUrlInput(BaseModel):
+    url: str
+
+
 class ClienteCreate(BaseModel):
     Cedula:               str
     Tipo_Documento:       str

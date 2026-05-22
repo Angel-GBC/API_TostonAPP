@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from datetime import datetime
 from decimal import Decimal
 
@@ -48,7 +48,7 @@ def _formato_producto(producto: Producto, db: Session) -> dict:
         "Estado":           estado_id,
         "estado_label":     estado_label,
         "imagenes": [
-            {"ID_Producto_Img": img.ID_Producto_Img, "url": f"/imagenes/productos/{img.ID_Producto_Img}"}
+            {"ID_Producto_Img": img.ID_Producto_Img, "url": img.imagen}
             for img in imagenes
         ],
         "ficha_tecnica": {
@@ -64,12 +64,16 @@ def _formato_producto(producto: Producto, db: Session) -> dict:
 
 def obtener_productos(
     db: Session,
-    pagina: int = 1,
+    pagina:     int = 1,
     por_pagina: int = 10,
-    busqueda: str = None
+    busqueda:   str = None,
+    estado:     int = None,
 ) -> dict:
-    """Lista paginada. Busca por nombre o categoría."""
+    """Lista paginada. Busca por nombre o categoría. Filtra por estado si se indica."""
     query = db.query(Producto)
+
+    if estado is not None:
+        query = query.filter(Producto.Estado == estado)
 
     if busqueda:
         termino = f"%{busqueda}%"
@@ -154,22 +158,14 @@ def editar_producto(db: Session, id_producto: int, datos: ProductoUpdate) -> dic
     return _formato_producto(producto, db)
 
 
-def agregar_imagenes(db: Session, id_producto: int, imagenes: list[UploadFile]) -> dict:
-    """
-    Recibe una lista de archivos de imagen, los guarda como binario
-    en Producto_Imagenes y los asocia al producto.
-    """
+def agregar_imagenes(db: Session, id_producto: int, urls: list[str]) -> dict:
+    """Recibe URLs de Cloudinary y las asocia al producto."""
     producto = db.query(Producto).filter(Producto.ID_Producto == id_producto).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
 
-    for imagen in imagenes:
-        contenido = imagen.file.read()
-        nueva_img = ProductoImagen(
-            ID_Producto = id_producto,
-            imagen      = contenido,
-        )
-        db.add(nueva_img)
+    for url in urls:
+        db.add(ProductoImagen(ID_Producto=id_producto, imagen=url))
 
     db.commit()
     return _formato_producto(producto, db)

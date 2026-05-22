@@ -11,7 +11,7 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-from src.shared.services.models import Usuario, Empleado, Rol, UsuarioXRol
+from src.shared.services.models import Usuario, Empleado, Rol, UsuarioXRol, Permiso, RolXPermiso
 
 load_dotenv()
 
@@ -305,3 +305,36 @@ def eliminar_foto_perfil(db: Session, actual: dict) -> None:
     registro = actual["registro"]
     registro.Foto_perfil = None
     db.commit()
+
+
+# ─────────────────────────────────────────
+# PERMISOS DEL USUARIO ACTUAL
+# ─────────────────────────────────────────
+
+def obtener_mis_permisos(db: Session, actual: dict) -> list[str]:
+    """
+    Retorna los nombres de permisos del usuario autenticado.
+    Admin (ID_Rol=1) recibe todos los permisos existentes sin consultar Rol_x_Permiso.
+    """
+    registro = actual["registro"]
+    tipo     = actual["tipo"]
+
+    if tipo == "empleado":
+        id_rol = registro.ID_Rol
+        if id_rol == 1:
+            return [p.Permiso for p in db.query(Permiso).all()]
+    else:
+        uxr = db.query(UsuarioXRol).filter(UsuarioXRol.ID_Usuario == registro.ID_Usuario).first()
+        if not uxr:
+            return []
+        id_rol = uxr.ID_Rol
+
+    return [
+        p.Permiso
+        for p in (
+            db.query(Permiso)
+            .join(RolXPermiso, RolXPermiso.ID_Permiso == Permiso.ID_Permiso)
+            .filter(RolXPermiso.ID_Rol == id_rol)
+            .all()
+        )
+    ]

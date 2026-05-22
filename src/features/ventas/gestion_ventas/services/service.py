@@ -8,12 +8,24 @@ from src.shared.services.models import (
     Estado, Domicilio, CreditoCliente, MovimientoCredito,
     Descuento, DescuentoXUsuario, DescuentoXVenta
 )
+from src.shared.services.notificaciones_utils import notificar, descartar_notificacion, notificar_stock_producto
 from .schemas import VentaCreate, DomicilioVentaInput
 
 
 def _label_estado(db: Session, id_estado: int) -> str:
     estado = db.query(Estado).filter(Estado.ID_Estados == id_estado).first()
     return estado.Estado if estado else None
+
+
+def _actualizar_estado_producto(producto: Producto) -> None:
+    stock  = producto.Stock or 0
+    minimo = getattr(producto, "Stock_Minimo", 0) or 0
+    if stock == 0:
+        producto.Estado = 15
+    elif stock <= minimo:
+        producto.Estado = 14
+    else:
+        producto.Estado = 1
 
 
 def _formato_venta(venta: Venta, db: Session) -> dict:
@@ -276,13 +288,11 @@ def crear_venta(db: Session, datos: VentaCreate) -> dict:
     db.flush()
 
     for p in datos.productos:
-        producto = db.query(Producto).filter(Producto.ID_Producto == p.ID_Producto).first()
         db.add(VentaXProducto(
             ID_Venta    = nueva_venta.ID_Venta,
             ID_Producto = p.ID_Producto,
             Cantidad    = p.Cantidad,
         ))
-        producto.Stock -= p.Cantidad
 
     monto_restante   = subtotal_bruto
     credito_aplicado = Decimal("0")
@@ -333,17 +343,36 @@ def cambiar_estado(db: Session, id_venta: int, nuevo_estado: int) -> dict:
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
 
-    # Si se está cancelando y el estado anterior no era ya cancelado,
-    # devolver el stock de cada producto al inventario.
     ESTADOS_CANCELACION = {3, 5}
-    if nuevo_estado in ESTADOS_CANCELACION and venta.Estado not in ESTADOS_CANCELACION:
+    # Estados donde el stock ya fue descontado (venta confirmada o en curso)
+    ESTADOS_CONFIRMADOS = {4, 8, 9, 11, 13}
+
+    # Al confirmar (4): validar y descontar stock de cada producto
+    if nuevo_estado == 4 and venta.Estado not in ESTADOS_CANCELACION | {4}:
+        items = db.query(VentaXProducto).filter(VentaXProducto.ID_Venta == id_venta).all()
+        for item in items:
+            producto = db.query(Producto).filter(Producto.ID_Producto == item.ID_Producto).first()
+            if not producto:
+                continue
+            if (producto.Stock or 0) < item.Cantidad:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Stock insuficiente para '{producto.nombre}': disponible {producto.Stock or 0}"
+                )
+            producto.Stock -= item.Cantidad
+            _actualizar_estado_producto(producto)
+
+    # Al cancelar: restaurar stock solo si la venta ya estaba confirmada
+    if nuevo_estado in ESTADOS_CANCELACION and venta.Estado in ESTADOS_CONFIRMADOS:
         items = db.query(VentaXProducto).filter(VentaXProducto.ID_Venta == id_venta).all()
         for item in items:
             producto = db.query(Producto).filter(Producto.ID_Producto == item.ID_Producto).first()
             if producto:
-                producto.Stock += item.Cantidad
+                producto.Stock = (producto.Stock or 0) + item.Cantidad
+                _actualizar_estado_producto(producto)
 
-        # Devolver crédito si se usó en esta venta
+    # Al cancelar: devolver crédito si se usó (independiente del stock)
+    if nuevo_estado in ESTADOS_CANCELACION and venta.Estado not in ESTADOS_CANCELACION:
         detalle = db.query(DetalleVenta).filter(DetalleVenta.ID_Venta == id_venta).first()
         if detalle and detalle.Descuento and detalle.Descuento > 0:
             credito = db.query(CreditoCliente).filter(

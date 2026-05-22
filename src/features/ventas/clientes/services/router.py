@@ -1,14 +1,13 @@
-from fastapi import APIRouter, Depends, Query, UploadFile, File
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from src.shared.services.database import get_db
 from src.features.auth.services.dependencies import requiere_permiso
-from .schemas import ClienteCreate, ClienteUpdate, ClienteEstado, ClienteResponse, ClienteListResponse
+from .schemas import ClienteCreate, ClienteUpdate, ClienteEstado, ClienteResponse, ClienteListResponse, FotoUrlInput
 from .service import (
     obtener_clientes, obtener_cliente, crear_cliente,
-    editar_cliente, cambiar_estado, subir_foto, obtener_foto, eliminar_cliente
+    editar_cliente, cambiar_estado, subir_foto, eliminar_cliente
 )
 
 router = APIRouter(prefix="/clientes", tags=["Clientes"])
@@ -33,15 +32,6 @@ def ver_cliente(
 ):
     return obtener_cliente(db, id_usuario)
 
-
-@router.get("/{id_usuario}/foto")
-def ver_foto(
-    id_usuario: int,
-    db:         Session = Depends(get_db),
-    _:          dict    = Depends(requiere_permiso("ver_usuarios"))
-):
-    foto = obtener_foto(db, id_usuario)
-    return Response(content=foto, media_type="image/jpeg")
 
 
 @router.post("/", response_model=ClienteResponse, status_code=201)
@@ -76,11 +66,11 @@ def toggle_estado(
 @router.post("/{id_usuario}/foto", response_model=ClienteResponse)
 def actualizar_foto(
     id_usuario: int,
-    foto:       UploadFile = File(...),
-    db:         Session    = Depends(get_db),
-    _:          dict       = Depends(requiere_permiso("editar_usuarios"))
+    datos:      FotoUrlInput,
+    db:         Session = Depends(get_db),
+    _:          dict    = Depends(requiere_permiso("editar_usuarios"))
 ):
-    return subir_foto(db, id_usuario, foto)
+    return subir_foto(db, id_usuario, datos.url)
 
 
 @router.delete("/{id_usuario}")

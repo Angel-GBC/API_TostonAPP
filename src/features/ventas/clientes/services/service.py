@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from datetime import datetime
 
 from src.shared.services.models import Usuario
@@ -104,22 +104,15 @@ def cambiar_estado(db: Session, id_usuario: int, nuevo_estado: int) -> dict:
     return _formato_cliente(cliente)
 
 
-def subir_foto(db: Session, id_usuario: int, foto: UploadFile) -> dict:
+def subir_foto(db: Session, id_usuario: int, url: str) -> dict:
     cliente = db.query(Usuario).filter(Usuario.ID_Usuario == id_usuario).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
-    cliente.Foto_perfil = foto.file.read()
+    cliente.Foto_perfil = url
     db.commit()
     db.refresh(cliente)
     return _formato_cliente(cliente)
-
-
-def obtener_foto(db: Session, id_usuario: int) -> bytes:
-    cliente = db.query(Usuario).filter(Usuario.ID_Usuario == id_usuario).first()
-    if not cliente or not cliente.Foto_perfil:
-        raise HTTPException(status_code=404, detail="Foto no encontrada")
-    return cliente.Foto_perfil
 
 
 def eliminar_cliente(db: Session, id_usuario: int) -> dict:
