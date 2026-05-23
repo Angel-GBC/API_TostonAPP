@@ -19,10 +19,10 @@ Guía de contexto para Claude Code. Léela completa antes de tocar cualquier arc
 
 - **NO actualizar bcrypt** — está fijado en 4.0.1 en requirements.txt, versiones superiores rompen el hashing
 - **NO usar `solo_empleados()`** en routers nuevos — está deprecado, usar siempre `requiere_permiso("nombre_permiso")`
-- **NO crear permisos `gestionar_X`** — solo existen `ver_`, `crear_`, `editar_`, `eliminar_`, algunos modulos pueden tener otros privilegios o menos
+- **NO crear permisos `gestionar_X`** — solo existen `ver_`, `crear_`, `editar_`, `eliminar_`
 - **NO tocar el módulo `configuracion/descuentos`** — postergado para una fase futura
 - **NO hardcodear contraseñas ni secrets** — usar variables de entorno via `python-dotenv`
-- **CORS**: URL del frontend: https://frontend-ten-xi-31.vercel.app/
+- **CORS**: actualizar a `allow_origins=["https://frontend-ten-xi-31.vercel.app", "http://localhost:5173"]` y `allow_credentials=True`. Actualmente está en `["*"]` con `allow_credentials=False` — PENDIENTE corregir
 
 ---
 
@@ -166,19 +166,71 @@ Stock_Actual > Stock_Minimo     → Estado = 1  (Activo)
 
 ---
 
+## Flujo general del sistema
+
+### Proveedores → Compras → Insumos
+El ciclo comienza con los **proveedores**, quienes abastecen a la empresa mediante **compras**. De cada compra se obtienen **insumos** (materia prima), que quedan registrados en lotes (`LoteCompra` / `LoteInsumo`). Tanto insumos como productos se organizan en **categorías**.
+
+### Sistema de lotes — FEFO estricto
+Insumos y productos se manejan por lotes. La regla de consumo es **FEFO (First Expired, First Out)**: siempre se descuenta primero del lote con fecha de vencimiento más próxima, independientemente de cuándo llegó al inventario.
+
+Reglas críticas del sistema de lotes:
+- **Al descontar stock** (por venta, orden de producción o salida), el sistema busca los lotes ordenados por `Fecha_Vencimiento ASC` y descuenta del más próximo a vencer primero.
+- **Si un lote no alcanza** para cubrir la cantidad requerida, el sistema toma el remanente del siguiente lote con la siguiente fecha de vencimiento más próxima, y así sucesivamente hasta completar la cantidad. Esto se hace en una sola operación transaccional.
+- **Los lotes pueden quedar en cantidad 0** y siguen existiendo en la BD como historial — no se eliminan ni se inactivan automáticamente.
+- **Los lotes de insumos** se crean al registrar una compra.
+- **Los lotes de productos** se crean únicamente cuando se completa una `OrdenProduccion` — la única forma de que exista stock de un producto es mediante una orden de producción completada (ya sea creada automáticamente por el sistema o manualmente por un empleado/admin).
+
+### Órdenes de producción y ficha técnica
+Cada producto tiene una **ficha técnica** (`FichaTecnica`) que es la referencia obligatoria para producirlo. La ficha técnica especifica:
+- Insumos requeridos y sus cantidades exactas
+- Medidas y procedimiento de fabricación
+- Pasos ordenados del proceso
+- Fecha de caducidad del producto resultante o cantidad de días de vida útil (dato crítico para el módulo de salidas)
+
+Cuando se completa una `OrdenProduccion`:
+1. Se descuentan los insumos requeridos según la ficha técnica, respetando FEFO
+2. Se crea un nuevo lote de producto (`LoteProducto`) con la cantidad producida y la fecha de caducidad calculada a partir de los días de vida útil de la ficha técnica
+3. Se incrementa el `Stock` total del producto
+4. El estado del producto se actualiza automáticamente según las reglas de stock
+
+Si al recibir un pedido de un cliente no hay stock suficiente del producto solicitado, el sistema genera automáticamente una `OrdenProduccion` con la cantidad necesaria. El pedido queda en estado `Pendiente` hasta que la orden se complete.
+
+### Módulo de salidas — vencimientos y daños
+Los insumos y productos pueden deteriorarse, vencerse o sufrir daños que obliguen a retirarlos del inventario. El módulo de **salidas** maneja estos casos:
+
+- **Salida automática por vencimiento**: el sistema detecta lotes cuya `Fecha_Vencimiento` se ha cumplido o cuya vida útil en días ha expirado, y registra la salida automáticamente. Lo más común es que un lote completo venza de golpe, por lo que el sistema procesa salidas de lotes enteros en la mayoría de los casos.
+- **Salida manual**: un empleado/admin con permisos puede registrar una salida por cualquier otra causa (daño, pérdida, contaminación, etc.) especificando el motivo, la cantidad y el lote afectado.
+- En ambos casos la cantidad se descuenta del lote correspondiente y el stock total del insumo o producto se actualiza automáticamente, aplicando también las reglas de estado por stock.
+
+### Ventas y domicilios
+Una vez el cliente confirma su pedido cumpliendo los requisitos (cuenta activa con rol Cliente, teléfono registrado en su perfil si el pedido incluye domicilio, y productos disponibles), se genera la **venta** y el stock de los productos se descuenta automáticamente respetando FEFO por lotes.
+
+El cliente puede optar por recibir su pedido como **domicilio**. Un empleado o admin con permisos asigna ese domicilio a un **domiciliario** (empleado con rol Domiciliario, `ID_Rol=4`). `Domicilios.ID_Empleado` apunta a `Empleados`, nunca a `Usuarios`.
+
+### Devoluciones y créditos
+Una vez el pedido es entregado (`Estado=8`), el cliente puede solicitar una **devolución**. La solicitud llega a un empleado/admin con permisos quien la analiza y puede aprobarla (`Estado=6`) o rechazarla (`Estado=7`). Si la aprueba, el cliente recibe **créditos** en `CreditoCliente` equivalentes al valor devuelto, registrando el movimiento en `MovimientoCredito` con tipo `'recarga'`. El cliente puede usar esos créditos como dinero en futuras compras.
+
+### Notificaciones
+- **Clientes**: cambio de estado de su pedido, cambio de estado de su devolución, mensajes generales del sistema.
+- **Empleados/Admin**: stock bajo de insumos o productos, stock agotado, domicilios pendientes de asignar, devoluciones pendientes de revisar, insumos o productos vencidos, compras pendientes de gestionar.
+
+### Acceso por tipo de usuario
+- **Invitados** (sin cuenta): pueden ver el catálogo, la landing page y agregar productos a un carrito local, pero no pueden confirmar pedidos hasta crear una cuenta con rol Cliente.
+- **Clientes** (rol ID=3): todo lo anterior más confirmar pedidos, ver sus pedidos y devoluciones con su estado en tiempo real, y editar su perfil.
+- **Empleados/Admin/Otros**: panel de gestión con sidebar dinámico según permisos. Admin (ID=1) tiene acceso total sin restricciones.
+
+---
+
 ## Reglas de negocio
 
 - Si una venta incluye domicilio → el cliente DEBE tener `Telefono` en su perfil (validar antes de crear)
 - Devolución aprobada → recargar crédito automáticamente en `CreditoCliente`
 - Al completar una `OrdenProduccion` → incrementar `Stock` del `Producto`
-- Al iniciar una `OrdenProduccion` → descontar `Stock_Actual` del `Insumo` usado, por eso es necesario que el producto tenga ficha tecnica
+- Al iniciar una `OrdenProduccion` → descontar `Stock_Actual` del `Insumo` usado
 - Al confirmar una venta → descontar `Stock` del `Producto`
 - Módulo Salidas (nuevo, aún no implementado): registra daños/vencimientos y descuenta stock directamente de `Insumos` o `Productos`
 - Descuentos: postergados — no implementar
-- Desactivar un rol causara que todos los usuarios con ese rol queden inactivos tambien
-- Desactivar un categoria de insumo causara que todos sus insumos con esa categoria queden desactivados
-- insumos provienen de compras de estado 11=`completadas`
-- Desactivar un categoria de producto causara que todos sus productos con esa categoria queden desactivados
 
 ---
 
@@ -199,7 +251,7 @@ PUT  /api/auth/perfil                Edita Telefono, Direccion, Municipio, Depar
 
 ## Contexto del frontend (para saber qué debe devolver la API)
 
-El frontend es React + Vite, desplegado en Vercel. La API debe estar lista para responder a tres tipos de usuario:
+El frontend es React + Vite, desplegado en https://frontend-ten-xi-31.vercel.app La API debe estar lista para responder a tres tipos de usuario:
 
 ### 1. Invitado (sin sesión)
 - Ve catálogo de productos públicamente → `GET /api/produccion/productos` debe funcionar sin token
@@ -232,15 +284,6 @@ GET /api/auth/mis-permisos   → retorna lista de nombres de permisos del usuari
 - Imports de DB siempre desde `src.shared.services.database`
 - Contraseña universal de prueba: `Admin123@` (seed.py la aplica en cada deploy)
 - Los errores de negocio van como `HTTPException`, no como excepciones genéricas
-
----
-
-## Lo que NO está implementado aún
-
-- `configuracion/salidas` — módulo nuevo para registrar daños/vencimientos (diseñar tabla SQL + modelo + CRUD)
-- `GET /api/auth/mis-permisos` — verificar si existe, si no crearlo
-- Foto de perfil: el campo existe en BD pero el endpoint PUT /auth/perfil puede no aceptarla aún
-- Cambio de contraseña estando autenticado
 
 ---
 

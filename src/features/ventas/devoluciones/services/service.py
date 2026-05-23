@@ -251,6 +251,11 @@ def crear_devolucion(db: Session, datos: DevolucionCreate) -> dict:
             Subtotal       = subtotal,
         ))
 
+    notificar(
+        db, "devolucion_pendiente", "Devolución pendiente",
+        f"La devolución #{nueva.ID_Devolucion} requiere revisión",
+        nueva.ID_Devolucion, f"/ventas/devoluciones/{nueva.ID_Devolucion}",
+    )
     db.commit()
     db.refresh(nueva)
     return _formato_devolucion(nueva, db)
@@ -323,6 +328,7 @@ def resolver_devolucion(db: Session, id_devolucion: int, datos: DevolucionResolu
             id_devolucion = dev.ID_Devolucion,
         )
 
+    descartar_notificacion(db, "devolucion_pendiente", id_devolucion)
     db.commit()
     db.refresh(dev)
     return _formato_devolucion(dev, db)

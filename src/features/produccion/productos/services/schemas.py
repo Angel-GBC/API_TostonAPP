@@ -63,6 +63,7 @@ class ProductoResponse(BaseModel):
     nombre:           str
     ID_Categoria:     Optional[int]     = None
     nombre_categoria: Optional[str]     = None
+    icono_categoria:  Optional[str]     = None
     Precio_venta:     Optional[Decimal] = None
     Stock:            Optional[int]     = None
     Stock_Minimo:     Optional[int]     = None

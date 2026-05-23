@@ -99,50 +99,62 @@ def obtener_insumo(db: Session, id_insumo: int) -> dict:
 def crear_insumo(db: Session, datos: InsumoCreate) -> dict:
     """
     Crea un insumo y opcionalmente crea su lote de compra.
-    Si viene lote, primero crea el lote y luego lo asocia al insumo.
+    Orden correcto: insumo primero → lote con ID_Insumo → actualiza insumo con lote.
     """
-    lote_id = None
-
-    if datos.Lote_Compra and datos.Lote_Compra.Cantidad_Inicial is not None:
-        nuevo_lote = LoteCompra(
-            Fecha_Vencimiento = datos.Lote_Compra.Fecha_Vencimiento,
-            Cantidad_Inicial  = datos.Lote_Compra.Cantidad_Inicial,
-            Estado            = 1,
-        )
-        db.add(nuevo_lote)
-        db.flush()          # obtiene el ID sin hacer commit aún
-        lote_id = nuevo_lote.ID_Lote_Compra
+    stock  = datos.Stock_Actual or 0
+    minimo = datos.Stock_Minimo or 0
+    if stock == 0:
+        estado_inicial = 15
+    elif stock <= minimo:
+        estado_inicial = 14
+    else:
+        estado_inicial = 1
 
     nuevo = Insumo(
         Nombre         = datos.Nombre,
         ID_Categoria   = datos.ID_Categoria,
         Unidad_Medida  = datos.Unidad_Medida,
-        Stock_Actual   = datos.Stock_Actual,
-        Stock_Minimo   = datos.Stock_Minimo,
-        ID_Lote_Compra = lote_id,
-        Estado         = 1,
+        Stock_Actual   = stock,
+        Stock_Minimo   = minimo,
+        ID_Lote_Compra = None,
+        Estado         = estado_inicial,
     )
     db.add(nuevo)
+    db.flush()  # obtiene ID_Insumo sin commit
+
+    if datos.Lote_Compra and datos.Lote_Compra.Cantidad_Inicial is not None:
+        nuevo_lote = LoteCompra(
+            ID_Insumo         = nuevo.ID_Insumo,
+            Fecha_Vencimiento = datos.Lote_Compra.Fecha_Vencimiento,
+            Cantidad_Inicial  = datos.Lote_Compra.Cantidad_Inicial,
+            Estado            = 1,
+        )
+        db.add(nuevo_lote)
+        db.flush()
+        nuevo.ID_Lote_Compra = nuevo_lote.ID_Lote_Compra
+
     db.commit()
     db.refresh(nuevo)
-
-    # Asocia el insumo al lote si se creó
-    if lote_id:
-        lote = db.query(LoteCompra).filter(LoteCompra.ID_Lote_Compra == lote_id).first()
-        lote.ID_Insumo = nuevo.ID_Insumo
-        db.commit()
-
     return _formato_insumo(nuevo, db)
 
 
 def editar_insumo(db: Session, id_insumo: int, datos: InsumoUpdate) -> dict:
-    """Edita solo los campos enviados."""
+    """Edita solo los campos enviados y recalcula el Estado si cambia el stock."""
     insumo = db.query(Insumo).filter(Insumo.ID_Insumo == id_insumo).first()
     if not insumo:
         raise HTTPException(status_code=404, detail="Insumo no encontrado")
 
     for campo, valor in datos.model_dump(exclude_none=True).items():
         setattr(insumo, campo, valor)
+
+    stock  = insumo.Stock_Actual or 0
+    minimo = insumo.Stock_Minimo or 0
+    if stock == 0:
+        insumo.Estado = 15
+    elif stock <= minimo:
+        insumo.Estado = 14
+    else:
+        insumo.Estado = 1
 
     db.commit()
     db.refresh(insumo)

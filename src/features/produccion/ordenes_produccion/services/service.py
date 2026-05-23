@@ -209,6 +209,7 @@ def cambiar_estado(db: Session, id_orden: int, nuevo_estado: int) -> dict:
             )
         insumo.Stock_Actual -= orden.Cantidad
         _actualizar_estado_insumo(insumo)
+        notificar_stock_insumo(db, insumo)
 
     # Al completar (11=Completada): incrementar stock del producto
     elif nuevo_estado == ESTADO_COMPLETADA and orden.Estado == ESTADO_EN_PROCESO:
@@ -217,6 +218,7 @@ def cambiar_estado(db: Session, id_orden: int, nuevo_estado: int) -> dict:
             raise HTTPException(status_code=404, detail="Producto no encontrado")
         producto.Stock = (producto.Stock or 0) + orden.Cantidad
         _actualizar_estado_producto(producto)
+        notificar_stock_producto(db, producto)
 
     # Al cancelar (5): restaurar insumo si la orden estaba en proceso
     elif nuevo_estado == ESTADO_CANCELADA and orden.Estado == ESTADO_EN_PROCESO:
@@ -224,6 +226,7 @@ def cambiar_estado(db: Session, id_orden: int, nuevo_estado: int) -> dict:
         if insumo:
             insumo.Stock_Actual = (insumo.Stock_Actual or 0) + orden.Cantidad
             _actualizar_estado_insumo(insumo)
+            notificar_stock_insumo(db, insumo)
 
     orden.Estado = nuevo_estado
     db.commit()

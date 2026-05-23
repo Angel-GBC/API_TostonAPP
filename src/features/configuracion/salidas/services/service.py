@@ -142,6 +142,7 @@ def crear_salida(db: Session, datos: SalidaCreate) -> dict:
             )
         insumo.Stock_Actual -= datos.Cantidad
         _actualizar_estado_insumo(insumo)
+        notificar_stock_insumo(db, insumo)
 
     else:
         producto = db.query(Producto).filter(Producto.ID_Producto == datos.ID_Producto).first()
@@ -154,6 +155,7 @@ def crear_salida(db: Session, datos: SalidaCreate) -> dict:
             )
         producto.Stock -= datos.Cantidad
         _actualizar_estado_producto(producto)
+        notificar_stock_producto(db, producto)
 
     nueva = Salida(
         Tipo        = datos.Tipo,
@@ -187,11 +189,13 @@ def anular_salida(db: Session, id_salida: int) -> dict:
         if insumo:
             insumo.Stock_Actual = (insumo.Stock_Actual or 0) + salida.Cantidad
             _actualizar_estado_insumo(insumo)
+            notificar_stock_insumo(db, insumo)
     else:
         producto = db.query(Producto).filter(Producto.ID_Producto == salida.ID_Producto).first()
         if producto:
             producto.Stock = (producto.Stock or 0) + salida.Cantidad
             _actualizar_estado_producto(producto)
+            notificar_stock_producto(db, producto)
 
     salida.Estado = ESTADO_ANULADA
     db.commit()

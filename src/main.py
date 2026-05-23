@@ -5,15 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.features.auth.services.router import router as auth_router
 
 # ── Configuración ──
-from src.features.configuracion.usuarios.services.router       import router as usuarios_router
-from src.features.configuracion.roles.services.router          import router as roles_router
-from src.features.configuracion.notificaciones.services.router import router as notificaciones_router
-from src.features.configuracion.salidas.services.router       import router as salidas_router
+from src.features.configuracion.usuarios.services.router           import router as usuarios_router
+from src.features.configuracion.roles.services.router              import router as roles_router
+from src.features.configuracion.notificaciones.services.router     import router as notificaciones_router
+from src.features.configuracion.salidas.services.router            import router as salidas_router
+from src.features.configuracion.control_acceso.services.router     import router as control_acceso_router
 
 # ── Compras ──
 from src.features.compras.insumos.services.router           import router as insumos_router
 from src.features.compras.categoria_insumos.services.router import router as cat_insumos_router
 from src.features.compras.proveedores.services.router       import router as proveedores_router
+from src.features.compras.compras.services.router           import router as compras_router
 
 # ── Producción ──
 from src.features.produccion.productos.services.router           import router as productos_router
@@ -49,15 +51,17 @@ app.add_middleware(
 # ── Registro de routers ──
 PREFIX = "/api"
 
-app.include_router(auth_router,          prefix=PREFIX)
-app.include_router(usuarios_router,      prefix=PREFIX)
-app.include_router(roles_router,         prefix=PREFIX)
-app.include_router(notificaciones_router, prefix=PREFIX)
-app.include_router(salidas_router,        prefix=PREFIX)
+app.include_router(auth_router,            prefix=PREFIX)
+app.include_router(usuarios_router,        prefix=PREFIX)
+app.include_router(roles_router,           prefix=PREFIX)
+app.include_router(notificaciones_router,  prefix=PREFIX)
+app.include_router(salidas_router,         prefix=PREFIX)
+app.include_router(control_acceso_router,  prefix=PREFIX)
 
-app.include_router(insumos_router,       prefix=PREFIX)
-app.include_router(cat_insumos_router,   prefix=PREFIX)
-app.include_router(proveedores_router,   prefix=PREFIX)
+app.include_router(insumos_router,         prefix=PREFIX)
+app.include_router(cat_insumos_router,     prefix=PREFIX)
+app.include_router(proveedores_router,     prefix=PREFIX)
+app.include_router(compras_router,         prefix=PREFIX)
 app.include_router(productos_router,     prefix=PREFIX)
 app.include_router(cat_productos_router, prefix=PREFIX)
 app.include_router(ordenes_router,       prefix=PREFIX)

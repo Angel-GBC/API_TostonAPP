@@ -287,6 +287,12 @@ def crear_venta(db: Session, datos: VentaCreate) -> dict:
     db.add(nueva_venta)
     db.flush()
 
+    notificar(
+        db, "pedido_nuevo", "Nuevo pedido recibido",
+        f"El pedido #{nueva_venta.ID_Venta} está esperando ser procesado",
+        nueva_venta.ID_Venta, "/ventas/pedidos",
+    )
+
     for p in datos.productos:
         db.add(VentaXProducto(
             ID_Venta    = nueva_venta.ID_Venta,
@@ -332,6 +338,12 @@ def crear_venta(db: Session, datos: VentaCreate) -> dict:
             Municipio_entrega    = datos.domicilio.Municipio_entrega,
             Departamento_entrega = datos.domicilio.Departamento_entrega,
         ))
+        if not datos.domicilio.ID_Empleado:
+            notificar(
+                db, "domicilio_pendiente", "Domicilio sin repartidor",
+                f"El pedido #{nueva_venta.ID_Venta} tiene domicilio sin repartidor asignado",
+                nueva_venta.ID_Venta, "/ventas/domicilios",
+            )
 
     db.commit()
     db.refresh(nueva_venta)
@@ -361,6 +373,7 @@ def cambiar_estado(db: Session, id_venta: int, nuevo_estado: int) -> dict:
                 )
             producto.Stock -= item.Cantidad
             _actualizar_estado_producto(producto)
+            notificar_stock_producto(db, producto)
 
     # Al cancelar: restaurar stock solo si la venta ya estaba confirmada
     if nuevo_estado in ESTADOS_CANCELACION and venta.Estado in ESTADOS_CONFIRMADOS:
@@ -370,6 +383,7 @@ def cambiar_estado(db: Session, id_venta: int, nuevo_estado: int) -> dict:
             if producto:
                 producto.Stock = (producto.Stock or 0) + item.Cantidad
                 _actualizar_estado_producto(producto)
+                notificar_stock_producto(db, producto)
 
     # Al cancelar: devolver crédito si se usó (independiente del stock)
     if nuevo_estado in ESTADOS_CANCELACION and venta.Estado not in ESTADOS_CANCELACION:
@@ -390,6 +404,10 @@ def cambiar_estado(db: Session, id_venta: int, nuevo_estado: int) -> dict:
                     Fecha         = datetime.now(),
                 ))
 
+    if venta.Estado == 1:
+        descartar_notificacion(db, "pedido_nuevo", id_venta)
+    if nuevo_estado in ESTADOS_CANCELACION:
+        descartar_notificacion(db, "domicilio_pendiente", id_venta)
     venta.Estado = nuevo_estado
     db.commit()
     db.refresh(venta)

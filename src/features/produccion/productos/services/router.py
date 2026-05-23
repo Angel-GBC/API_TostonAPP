@@ -4,10 +4,10 @@ from typing import Optional
 
 from src.shared.services.database import get_db
 from src.features.auth.services.dependencies import requiere_permiso
-from .schemas import ProductoCreate, ProductoUpdate, ProductoResponse, ProductoListResponse, ImagenesUrlInput
+from .schemas import ProductoCreate, ProductoUpdate, ProductoResponse, ProductoListResponse, ImagenesUrlInput, FichaTecnicaInput
 from .service import (
     obtener_productos, obtener_producto, crear_producto,
-    editar_producto, agregar_imagenes, eliminar_imagen, eliminar_producto
+    editar_producto, agregar_imagenes, eliminar_imagen, eliminar_producto, gestionar_ficha
 )
 
 router = APIRouter(prefix="/productos", tags=["Gesti\u00f3n de Productos"])
@@ -72,6 +72,28 @@ def borrar_imagen(
 ):
     """Elimina una imagen espec\u00edfica del producto."""
     return eliminar_imagen(db, id_imagen)
+
+
+@router.post("/{id_producto}/ficha", response_model=ProductoResponse)
+def crear_ficha(
+    id_producto: int,
+    datos:       FichaTecnicaInput,
+    db:          Session = Depends(get_db),
+    _:           dict    = Depends(requiere_permiso("editar_productos"))
+):
+    """Crea o actualiza la ficha técnica de un producto existente."""
+    return gestionar_ficha(db, id_producto, datos)
+
+
+@router.put("/{id_producto}/ficha", response_model=ProductoResponse)
+def editar_ficha(
+    id_producto: int,
+    datos:       FichaTecnicaInput,
+    db:          Session = Depends(get_db),
+    _:           dict    = Depends(requiere_permiso("editar_productos"))
+):
+    """Actualiza la ficha técnica de un producto existente."""
+    return gestionar_ficha(db, id_producto, datos)
 
 
 @router.delete("/{id_producto}")

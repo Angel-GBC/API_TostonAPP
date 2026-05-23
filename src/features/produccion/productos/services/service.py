@@ -7,16 +7,16 @@ from src.shared.services.models import Producto, CategoriaProducto, ProductoImag
 from .schemas import ProductoCreate, ProductoUpdate, FichaTecnicaInput
 
 
-# IDs de estado en la tabla Estados (ajusta si difieren en tu BD)
-ESTADO_DISPONIBLE     = 1
-ESTADO_NO_DISPONIBLE  = 2
-
-
 def _calcular_estado(stock: int, stock_minimo: int) -> tuple[int, str]:
-    """Retorna el ID de estado y su etiqueta según el stock."""
-    if stock > stock_minimo:
-        return ESTADO_DISPONIBLE, "Disponible"
-    return ESTADO_NO_DISPONIBLE, "No disponible"
+    """Retorna el ID de estado y su etiqueta según el stock.
+    Reglas: 0 → 15 Agotado, 0 < stock <= minimo → 14 Stock bajo, >minimo → 1 Activo.
+    """
+    if stock == 0:
+        return 15, "Agotado"
+    elif stock <= stock_minimo:
+        return 14, "Stock bajo"
+    else:
+        return 1, "Activo"
 
 
 def _formato_producto(producto: Producto, db: Session) -> dict:
@@ -42,6 +42,7 @@ def _formato_producto(producto: Producto, db: Session) -> dict:
         "nombre":           producto.nombre,
         "ID_Categoria":     producto.ID_Categoria,
         "nombre_categoria": categoria.Nombre_Categoria if categoria else None,
+        "icono_categoria":  categoria.Icono if categoria else None,
         "Precio_venta":     producto.Precio_venta,
         "Stock":            stock,
         "Stock_Minimo":     stock_minimo,
@@ -181,6 +182,36 @@ def eliminar_imagen(db: Session, id_imagen: int) -> dict:
     db.delete(imagen)
     db.commit()
     return {"mensaje": f"Imagen {id_imagen} eliminada"}
+
+
+def gestionar_ficha(db: Session, id_producto: int, datos: FichaTecnicaInput) -> dict:
+    """Upsert de ficha técnica: crea si no existe, edita si ya existe."""
+    producto = db.query(Producto).filter(Producto.ID_Producto == id_producto).first()
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    ficha = db.query(FichaTecnica).filter(
+        FichaTecnica.ID_Producto == id_producto
+    ).order_by(FichaTecnica.Fecha_Creacion.desc()).first()
+
+    if ficha:
+        for campo, valor in datos.model_dump(exclude_none=True).items():
+            setattr(ficha, campo, valor)
+    else:
+        ficha = FichaTecnica(
+            ID_Producto    = id_producto,
+            ID_Categoria   = producto.ID_Categoria,
+            Version        = datos.Version or "1.0",
+            Observaciones  = datos.Observaciones,
+            Procedimiento  = datos.Procedimiento,
+            Estado         = 1,
+            Fecha_Creacion = datetime.now(),
+        )
+        db.add(ficha)
+
+    db.commit()
+    db.refresh(producto)
+    return _formato_producto(producto, db)
 
 
 def eliminar_producto(db: Session, id_producto: int) -> dict:

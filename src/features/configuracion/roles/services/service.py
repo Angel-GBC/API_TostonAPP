@@ -267,13 +267,13 @@ def asignar_permisos(db: Session, id_rol: int, permisos_ids: list[int]):
     """
     Reemplaza todos los permisos del rol con la nueva lista.
     Lista vacía = quitar todos los permisos.
+    Valida todos los IDs antes de hacer cualquier cambio para evitar estados inconsistentes.
     """
     rol = db.query(Rol).filter(Rol.ID_Rol == id_rol).first()
     if not rol:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
 
-    db.query(RolXPermiso).filter(RolXPermiso.ID_Rol == id_rol).delete()
-
+    # Valida todos los permisos primero — antes de tocar la BD
     for id_permiso in permisos_ids:
         permiso = db.query(Permiso).filter(Permiso.ID_Permiso == id_permiso).first()
         if not permiso:
@@ -281,6 +281,14 @@ def asignar_permisos(db: Session, id_rol: int, permisos_ids: list[int]):
                 status_code=404,
                 detail=f"Permiso con ID {id_permiso} no encontrado"
             )
+
+    # Elimina todos los permisos actuales del rol
+    db.query(RolXPermiso).filter(RolXPermiso.ID_Rol == id_rol).delete(
+        synchronize_session=False
+    )
+
+    # Asigna los nuevos permisos
+    for id_permiso in permisos_ids:
         db.add(RolXPermiso(ID_Rol=id_rol, ID_Permiso=id_permiso))
 
     db.commit()
