@@ -37,6 +37,8 @@ class RegistroInput(BaseModel):
 
     @model_validator(mode="after")
     def validar_contrasenas(self):
+        if len(self.Contrasena) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
         if self.Contrasena != self.Confirmar_contrasena:
             raise ValueError("Las contraseñas no coinciden")
         return self
@@ -67,6 +69,12 @@ class ResetearContrasenaInput(BaseModel):
     token:            str = Field(example="eyJhbGci...")
     nueva_contrasena: str = Field(example="NuevaClave123@")
 
+    @model_validator(mode="after")
+    def validar_contrasena(self):
+        if len(self.nueva_contrasena) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
+        return self
+
 
 class ResetearContrasenaResponse(BaseModel):
     mensaje: str
@@ -80,6 +88,8 @@ class CambiarContrasenaInput(BaseModel):
 
     @model_validator(mode="after")
     def validar_contrasenas(self):
+        if len(self.nueva_contrasena) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres")
         if self.nueva_contrasena != self.confirmar_contrasena:
             raise ValueError("Las contraseñas nuevas no coinciden")
         if self.contrasena_actual == self.nueva_contrasena:
