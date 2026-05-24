@@ -112,6 +112,18 @@ class UsuarioXRol(Base):
     usuario = relationship("Usuario", back_populates="roles")
 
 
+class VerificacionEmail(Base):
+    __tablename__ = "Verificaciones_Email"
+
+    ID_Verificacion = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    ID_Usuario      = Column(Integer, ForeignKey("Usuarios.ID_Usuario"))
+    Token           = Column(String(36), unique=True, index=True)
+    Expira_En       = Column(DateTime)
+    Usado           = Column(Boolean, default=False)
+
+    usuario = relationship("Usuario", foreign_keys=[ID_Usuario])
+
+
 # ─────────────────────────────────────────
 # CATEGORIAS
 # ─────────────────────────────────────────

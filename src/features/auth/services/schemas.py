@@ -102,3 +102,17 @@ class PerfilUpdate(BaseModel):
 # ── Foto de perfil (Cloudinary) ──
 class FotoUrlInput(BaseModel):
     url: str = Field(example="https://res.cloudinary.com/demo/image/upload/sample.jpg")
+
+
+# ── Registro (respuesta simple — token se da después de verificar email) ──
+class RegistroResponse(BaseModel):
+    mensaje: str
+
+
+# ── Reenviar verificación ──
+class ReenviarVerificacionInput(BaseModel):
+    correo: str = Field(example="ana@gmail.com")
+
+
+class ReenviarVerificacionResponse(BaseModel):
+    mensaje: str

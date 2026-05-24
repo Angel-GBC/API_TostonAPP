@@ -128,8 +128,8 @@ def obtener_salida(db: Session, id_salida: int) -> dict:
 
 def crear_salida(db: Session, datos: SalidaCreate) -> dict:
     """
-    Registra la salida y descuenta el stock del insumo o producto.
-    Recalcula automáticamente el estado de stock del ítem afectado.
+    Registra la salida y descuenta el stock en una sola transacción.
+    Las notificaciones se envían después del commit para no romper atomicidad.
     """
     if datos.ID_Insumo:
         insumo = db.query(Insumo).filter(Insumo.ID_Insumo == datos.ID_Insumo).first()
@@ -142,7 +142,6 @@ def crear_salida(db: Session, datos: SalidaCreate) -> dict:
             )
         insumo.Stock_Actual -= datos.Cantidad
         _actualizar_estado_insumo(insumo)
-        notificar_stock_insumo(db, insumo)
 
     else:
         producto = db.query(Producto).filter(Producto.ID_Producto == datos.ID_Producto).first()
@@ -155,7 +154,6 @@ def crear_salida(db: Session, datos: SalidaCreate) -> dict:
             )
         producto.Stock -= datos.Cantidad
         _actualizar_estado_producto(producto)
-        notificar_stock_producto(db, producto)
 
     nueva = Salida(
         Tipo        = datos.Tipo,
@@ -170,6 +168,17 @@ def crear_salida(db: Session, datos: SalidaCreate) -> dict:
     db.add(nueva)
     db.commit()
     db.refresh(nueva)
+
+    # Notificaciones fuera de la transacción principal
+    if nueva.ID_Insumo:
+        insumo = db.query(Insumo).filter(Insumo.ID_Insumo == nueva.ID_Insumo).first()
+        if insumo:
+            notificar_stock_insumo(db, insumo)
+    else:
+        producto = db.query(Producto).filter(Producto.ID_Producto == nueva.ID_Producto).first()
+        if producto:
+            notificar_stock_producto(db, producto)
+
     return _formato_salida(nueva, db)
 
 
@@ -189,15 +198,24 @@ def anular_salida(db: Session, id_salida: int) -> dict:
         if insumo:
             insumo.Stock_Actual = (insumo.Stock_Actual or 0) + salida.Cantidad
             _actualizar_estado_insumo(insumo)
-            notificar_stock_insumo(db, insumo)
     else:
         producto = db.query(Producto).filter(Producto.ID_Producto == salida.ID_Producto).first()
         if producto:
             producto.Stock = (producto.Stock or 0) + salida.Cantidad
             _actualizar_estado_producto(producto)
-            notificar_stock_producto(db, producto)
 
     salida.Estado = ESTADO_ANULADA
     db.commit()
     db.refresh(salida)
+
+    # Notificaciones fuera de la transacción principal
+    if salida.ID_Insumo:
+        insumo = db.query(Insumo).filter(Insumo.ID_Insumo == salida.ID_Insumo).first()
+        if insumo:
+            notificar_stock_insumo(db, insumo)
+    else:
+        producto = db.query(Producto).filter(Producto.ID_Producto == salida.ID_Producto).first()
+        if producto:
+            notificar_stock_producto(db, producto)
+
     return _formato_salida(salida, db)

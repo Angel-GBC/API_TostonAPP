@@ -1,22 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from src.shared.services.database import get_db
 from src.features.auth.services.dependencies import obtener_usuario_actual
 from .schemas import (
-    LoginInput, TokenResponse, RegistroInput,
+    LoginInput, TokenResponse, RegistroInput, RegistroResponse,
     RecuperarContrasenaInput, RecuperarContrasenaResponse,
     VerificarCodigoInput, VerificarCodigoResponse,
     ResetearContrasenaInput, ResetearContrasenaResponse,
     CambiarContrasenaInput, CambiarContrasenaResponse,
     PerfilUpdate, FotoUrlInput,
+    ReenviarVerificacionInput, ReenviarVerificacionResponse,
 )
 from .service import (
     autenticar, crear_token, obtener_nombre_rol,
     registrar_cliente, solicitar_recuperacion,
     verificar_codigo_recuperacion, resetear_contrasena,
     cambiar_contrasena, actualizar_foto_perfil, eliminar_foto_perfil,
-    obtener_mis_permisos,
+    obtener_mis_permisos, verificar_email_token, reenviar_verificacion,
 )
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -81,27 +83,31 @@ def login(datos: LoginInput, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/registro", response_model=TokenResponse, status_code=201)
+@router.post("/registro", response_model=RegistroResponse, status_code=201)
 def registro_cliente(datos: RegistroInput, db: Session = Depends(get_db)):
-    usuario = registrar_cliente(db, datos)
+    registrar_cliente(db, datos)
+    return RegistroResponse(
+        mensaje="Registro exitoso. Revisa tu correo electrónico para verificar tu cuenta antes de iniciar sesión."
+    )
 
-    from src.shared.services.models import UsuarioXRol, Rol as RolModel
-    uxr        = db.query(UsuarioXRol).filter(UsuarioXRol.ID_Usuario == usuario.ID_Usuario).first()
-    nombre_rol = None
-    if uxr:
-        rol_obj    = db.query(RolModel).filter(RolModel.ID_Rol == uxr.ID_Rol).first()
-        nombre_rol = rol_obj.Rol if rol_obj else None
 
-    token = crear_token({"id": usuario.ID_Usuario, "tipo": "usuario", "rol": nombre_rol})
+@router.get("/verificar-email")
+def verificar_email(token: str, db: Session = Depends(get_db)):
+    try:
+        redirect_url = verificar_email_token(db, token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return RedirectResponse(url=redirect_url)
 
-    return TokenResponse(
-        access_token = token,
-        token_type   = "bearer",
-        tipo         = "usuario",
-        cedula       = usuario.ID_Usuario,
-        nombre       = usuario.Nombre,
-        apellidos    = usuario.Apellidos,
-        rol          = nombre_rol,
+
+@router.post("/reenviar-verificacion", response_model=ReenviarVerificacionResponse)
+def reenviar_verificacion_endpoint(datos: ReenviarVerificacionInput, db: Session = Depends(get_db)):
+    try:
+        reenviar_verificacion(db, datos.correo)
+    except Exception:
+        pass  # no revelar nada
+    return ReenviarVerificacionResponse(
+        mensaje="Si el correo está registrado y pendiente de verificación, recibirás un nuevo enlace."
     )
 
 

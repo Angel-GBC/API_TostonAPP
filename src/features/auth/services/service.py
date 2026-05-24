@@ -7,17 +7,22 @@ from dotenv import load_dotenv
 from typing import Dict, Any
 import smtplib
 import random
+import uuid
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-from src.shared.services.models import Usuario, Empleado, Rol, UsuarioXRol, Permiso, RolXPermiso
+from src.shared.services.models import (
+    Usuario, Empleado, Rol, UsuarioXRol, Permiso, RolXPermiso, VerificacionEmail
+)
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM  = os.getenv("ALGORITHM", "HS256")
-EXPIRE_MIN = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 480))
+SECRET_KEY   = os.getenv("SECRET_KEY")
+ALGORITHM    = os.getenv("ALGORITHM", "HS256")
+EXPIRE_MIN   = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 480))
+API_URL      = os.getenv("API_URL", "http://localhost:8000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 RESET_TOKEN_EXPIRE_MIN = 10
 CODE_EXPIRE_MIN        = 10
@@ -105,6 +110,12 @@ def autenticar(db: Session, correo: str, contrasena: str):
     if not verificar_contrasena(contrasena, registro.Contrasena):
         return None, None
 
+    if tipo == "usuario" and getattr(registro, "Estado", None) == 2:
+        raise HTTPException(
+            status_code=403,
+            detail="Debes verificar tu correo electrónico antes de iniciar sesión. Revisa tu bandeja de entrada.",
+        )
+
     return registro, tipo
 
 
@@ -112,28 +123,26 @@ def autenticar(db: Session, correo: str, contrasena: str):
 # REGISTRO
 # ─────────────────────────────────────────
 
-def registrar_cliente(db: Session, datos) -> Usuario:
+def registrar_cliente(db: Session, datos) -> None:
     """
-    Crea un nuevo usuario (cliente) con los datos mínimos
+    Crea un nuevo usuario (cliente) con Estado=2 (inactivo hasta verificar correo)
     y le asigna automáticamente el rol Cliente en Usuario_x_Rol.
-    Los campos opcionales quedan null hasta que complete su perfil.
+    Genera un token UUID de verificación y lo envía por email.
     """
     if buscar_por_correo(db, datos.Correo)[0]:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
 
-    # Verificar que el rol Cliente existe en BD
     rol_cliente = db.query(Rol).filter(Rol.Rol == "Cliente").first()
     if not rol_cliente:
         raise HTTPException(status_code=500, detail="Rol Cliente no encontrado en el sistema")
 
-    # Crear el usuario
     nuevo = Usuario(
         Nombre         = datos.Nombre,
         Apellidos      = datos.Apellidos,
         Correo         = datos.Correo,
         Contrasena     = hashear_contrasena(datos.Contrasena),
         Fecha_creacion = datetime.now(),
-        Estado         = 1,
+        Estado         = 2,  # inactivo hasta verificar email
         Cedula         = None,
         Tipo_Documento = None,
         Direccion      = None,
@@ -142,17 +151,135 @@ def registrar_cliente(db: Session, datos) -> Usuario:
         Telefono       = None,
     )
     db.add(nuevo)
-    db.flush()  # genera el ID_Usuario sin hacer commit aún
+    db.flush()
 
-    # Asignar rol Cliente automáticamente
     db.add(UsuarioXRol(
         ID_Rol     = rol_cliente.ID_Rol,
         ID_Usuario = nuevo.ID_Usuario,
     ))
 
+    token = str(uuid.uuid4())
+    db.add(VerificacionEmail(
+        ID_Usuario = nuevo.ID_Usuario,
+        Token      = token,
+        Expira_En  = datetime.utcnow() + timedelta(hours=24),
+        Usado      = False,
+    ))
+
+    try:
+        _enviar_email_verificacion(datos.Correo, token, datos.Nombre)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo enviar el correo de verificación: {exc}",
+        )
+
     db.commit()
-    db.refresh(nuevo)
-    return nuevo
+
+
+# ─────────────────────────────────────────
+# VERIFICACIÓN DE EMAIL
+# ─────────────────────────────────────────
+
+def _enviar_email_verificacion(correo_destino: str, token: str, nombre: str = "") -> None:
+    """Envía el enlace de verificación de email vía Resend SMTP relay."""
+    link = f"{API_URL}/api/auth/verificar-email?token={token}"
+
+    msg            = MIMEMultipart("alternative")
+    msg["Subject"] = "✅ Verifica tu correo — Brom's"
+    msg["From"]    = EMAIL_FROM
+    msg["To"]      = correo_destino
+
+    saludo = f"Hola <strong>{nombre}</strong>," if nombre else "Hola,"
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:20px;">
+      <div style="background:linear-gradient(135deg,#2E7D32,#66BB6A);padding:24px;border-radius:14px;text-align:center;margin-bottom:24px;">
+        <h1 style="color:white;margin:0;font-size:22px;">🌿 Brom's</h1>
+        <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Verificación de correo</p>
+      </div>
+      <p style="color:#333;">{saludo}</p>
+      <p style="color:#555;font-size:14px;">
+        Gracias por registrarte. Haz clic en el botón para activar tu cuenta:
+      </p>
+      <div style="text-align:center;margin:28px 0;">
+        <a href="{link}"
+           style="background:#2E7D32;color:white;padding:14px 32px;border-radius:10px;
+                  text-decoration:none;font-size:15px;font-weight:bold;display:inline-block;">
+          Verificar mi correo
+        </a>
+      </div>
+      <p style="color:#999;font-size:12px;">
+        El enlace es válido por 24 horas. Si no creaste esta cuenta, ignora este correo.
+      </p>
+      <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
+      <p style="color:#bbb;font-size:11px;text-align:center;">
+        Brom's · Correo automático, no respondas a este mensaje.
+      </p>
+    </div>
+    """
+    msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP("smtp.resend.com", 587) as server:
+        server.starttls()
+        server.login("resend", RESEND_API_KEY)
+        server.sendmail(EMAIL_FROM, correo_destino, msg.as_string())
+
+
+def verificar_email_token(db: Session, token: str) -> str:
+    """
+    Valida el token UUID de verificación.
+    Si es válido → activa el usuario (Estado=1) y marca el token como Usado.
+    Retorna la URL del frontend para el redirect.
+    """
+    verificacion = db.query(VerificacionEmail).filter(VerificacionEmail.Token == token).first()
+
+    if not verificacion:
+        raise ValueError("Token de verificación inválido o inexistente.")
+
+    if verificacion.Usado:
+        raise ValueError("Este enlace ya fue utilizado.")
+
+    if datetime.utcnow() > verificacion.Expira_En:
+        raise ValueError("El enlace de verificación ha expirado. Solicita uno nuevo.")
+
+    usuario = db.query(Usuario).filter(Usuario.ID_Usuario == verificacion.ID_Usuario).first()
+    if not usuario:
+        raise ValueError("El usuario asociado al token no existe.")
+
+    usuario.Estado       = 1
+    verificacion.Usado   = True
+    db.commit()
+
+    return f"{FRONTEND_URL}/login?verificado=1"
+
+
+def reenviar_verificacion(db: Session, correo: str) -> None:
+    """
+    Invalida tokens anteriores del correo, genera uno nuevo y lo envía.
+    No revela si el correo existe o no para evitar enumeración.
+    """
+    usuario = db.query(Usuario).filter(Usuario.Correo == correo).first()
+    if not usuario or usuario.Estado != 2:
+        return  # no revelar
+
+    # Invalidar tokens previos
+    db.query(VerificacionEmail).filter(
+        VerificacionEmail.ID_Usuario == usuario.ID_Usuario,
+        VerificacionEmail.Usado      == False,
+    ).update({"Usado": True})
+
+    token = str(uuid.uuid4())
+    db.add(VerificacionEmail(
+        ID_Usuario = usuario.ID_Usuario,
+        Token      = token,
+        Expira_En  = datetime.utcnow() + timedelta(hours=24),
+        Usado      = False,
+    ))
+    db.commit()
+
+    nombre = usuario.Nombre or ""
+    _enviar_email_verificacion(correo, token, nombre)
 
 
 # ─────────────────────────────────────────
