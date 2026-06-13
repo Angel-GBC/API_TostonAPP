@@ -306,6 +306,9 @@ def crear_venta(db: Session, datos: VentaCreate) -> dict:
 
     ESTADO_PENDIENTE = 1
 
+    cp_len = len(datos.comprobante_pago) if datos.comprobante_pago else 0
+    print(f"[crear_venta] comprobante_pago recibido: {'SÍ, len=' + str(cp_len) if cp_len else 'NO (None)'}")
+
     nueva_venta = Venta(
         ID_Usuario       = datos.ID_Usuario,
         Total            = subtotal_bruto,
@@ -378,6 +381,8 @@ def crear_venta(db: Session, datos: VentaCreate) -> dict:
 
     db.commit()
     db.refresh(nueva_venta)
+    saved_len = len(nueva_venta.Comprobante_Pago) if nueva_venta.Comprobante_Pago else 0
+    print(f"[crear_venta] comprobante guardado en DB: {'SÍ, len=' + str(saved_len) if saved_len else 'NO (None)'}")
     return _formato_venta(nueva_venta, db)
 
 

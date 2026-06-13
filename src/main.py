@@ -84,15 +84,19 @@ def _migrar_columnas():
                 "ALTER TABLE Ventas ADD COLUMN Comprobante_Pago LONGTEXT NULL"
             ))
             conn.commit()
+            print("[migración] Columna Comprobante_Pago añadida como LONGTEXT ✅")
         except Exception:
-            # La columna ya existe — asegurar que sea LONGTEXT (no TEXT de 64 KB)
+            # La columna ya existe — rollback requerido en SQLAlchemy 2.x
+            # antes de ejecutar otro statement, luego verificar que sea LONGTEXT
             try:
+                conn.rollback()
                 conn.execute(text(
                     "ALTER TABLE Ventas MODIFY COLUMN Comprobante_Pago LONGTEXT NULL"
                 ))
                 conn.commit()
-            except Exception:
-                pass
+                print("[migración] Columna Comprobante_Pago modificada a LONGTEXT ✅")
+            except Exception as e:
+                print(f"[migración] Columna Comprobante_Pago ya es LONGTEXT o no se pudo modificar: {e}")
 
 
 @app.get("/")
