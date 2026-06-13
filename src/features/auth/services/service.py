@@ -13,7 +13,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from src.shared.services.models import (
-    Usuario, Empleado, Rol, UsuarioXRol, Permiso, RolXPermiso, VerificacionEmail
+    Usuario, Empleado, Rol, UsuarioXRol, Permiso, RolXPermiso,
+    VerificacionEmail, CodigoReset,
 )
 
 load_dotenv()
@@ -27,11 +28,13 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 RESET_TOKEN_EXPIRE_MIN = 10
 CODE_EXPIRE_MIN        = 10
 
-RESEND_API_KEY  = os.getenv("RESEND_API_KEY", "")
-EMAIL_FROM      = "Brom's <onboarding@resend.dev>"
-
-# Almacén en memoria: { correo_lower: { "codigo": "123456", "expires": datetime } }
-_codigos_reset: Dict[str, Dict[str, Any]] = {}
+# ── Proveedores de email ───────────────────────────────────────────────────────
+# Prioridad: Gmail > Resend
+# Gmail: crea una cuenta Gmail dedicada + genera "Contraseña de aplicación" en
+#        Google Account → Seguridad → Verificación en 2 pasos → Contraseñas de app
+GMAIL_USER     = os.getenv("GMAIL_USER", "")
+GMAIL_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -179,28 +182,57 @@ def registrar_cliente(db: Session, datos) -> None:
 
 
 # ─────────────────────────────────────────
+# ENVÍO DE EMAIL (Gmail o Resend)
+# ─────────────────────────────────────────
+
+def _email_from() -> str:
+    if GMAIL_USER:
+        return GMAIL_USER
+    return "Brom's <onboarding@resend.dev>"
+
+
+def _enviar_smtp(msg: MIMEMultipart, correo_destino: str) -> None:
+    """Envía un email usando Gmail (preferido) o Resend como fallback."""
+    remitente = _email_from()
+    msg["From"] = remitente
+    msg["To"]   = correo_destino
+
+    if GMAIL_USER and GMAIL_PASSWORD:
+        with smtplib.SMTP("smtp.gmail.com", 587) as s:
+            s.ehlo()
+            s.starttls()
+            s.login(GMAIL_USER, GMAIL_PASSWORD)
+            s.sendmail(GMAIL_USER, correo_destino, msg.as_string())
+    elif RESEND_API_KEY:
+        with smtplib.SMTP("smtp.resend.com", 587) as s:
+            s.starttls()
+            s.login("resend", RESEND_API_KEY)
+            s.sendmail(remitente, correo_destino, msg.as_string())
+    else:
+        raise RuntimeError("Sin proveedor de email. Configura GMAIL_USER+GMAIL_APP_PASSWORD o RESEND_API_KEY.")
+
+
+# ─────────────────────────────────────────
 # VERIFICACIÓN DE EMAIL
 # ─────────────────────────────────────────
 
 def _enviar_email_verificacion(correo_destino: str, token: str, nombre: str = "") -> None:
-    """Envía el enlace de verificación de email vía Resend SMTP relay."""
+    """Envía el enlace de verificación de cuenta."""
     link = f"{API_URL}/api/auth/verificar-email?token={token}"
 
     msg            = MIMEMultipart("alternative")
-    msg["Subject"] = "✅ Verifica tu correo — Brom's"
-    msg["From"]    = EMAIL_FROM
-    msg["To"]      = correo_destino
+    msg["Subject"] = "Verifica tu correo — Brom's"
 
     saludo = f"Hola <strong>{nombre}</strong>," if nombre else "Hola,"
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:20px;">
       <div style="background:linear-gradient(135deg,#2E7D32,#66BB6A);padding:24px;border-radius:14px;text-align:center;margin-bottom:24px;">
-        <h1 style="color:white;margin:0;font-size:22px;">🌿 Brom's</h1>
-        <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Verificación de correo</p>
+        <h1 style="color:white;margin:0;font-size:22px;">Brom's</h1>
+        <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Verificacion de correo</p>
       </div>
       <p style="color:#333;">{saludo}</p>
       <p style="color:#555;font-size:14px;">
-        Gracias por registrarte. Haz clic en el botón para activar tu cuenta:
+        Gracias por registrarte. Haz clic en el boton para activar tu cuenta:
       </p>
       <div style="text-align:center;margin:28px 0;">
         <a href="{link}"
@@ -210,20 +242,12 @@ def _enviar_email_verificacion(correo_destino: str, token: str, nombre: str = ""
         </a>
       </div>
       <p style="color:#999;font-size:12px;">
-        El enlace es válido por 24 horas. Si no creaste esta cuenta, ignora este correo.
-      </p>
-      <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
-      <p style="color:#bbb;font-size:11px;text-align:center;">
-        Brom's · Correo automático, no respondas a este mensaje.
+        El enlace es valido por 24 horas. Si no creaste esta cuenta, ignora este correo.
       </p>
     </div>
     """
     msg.attach(MIMEText(html, "html"))
-
-    with smtplib.SMTP("smtp.resend.com", 587) as server:
-        server.starttls()
-        server.login("resend", RESEND_API_KEY)
-        server.sendmail(EMAIL_FROM, correo_destino, msg.as_string())
+    _enviar_smtp(msg, correo_destino)
 
 
 def verificar_email_token(db: Session, token: str) -> str:
@@ -287,91 +311,90 @@ def reenviar_verificacion(db: Session, correo: str) -> None:
 # ─────────────────────────────────────────
 
 def _enviar_email_codigo(correo_destino: str, codigo: str, nombre: str = "") -> None:
-    """Envía el código de verificación vía Resend SMTP relay."""
+    """Envía el código de recuperación de contraseña."""
     msg            = MIMEMultipart("alternative")
-    msg["Subject"] = "🔑 Código de recuperación — Brom's"
-    msg["From"]    = EMAIL_FROM
-    msg["To"]      = correo_destino
+    msg["Subject"] = "Codigo de recuperacion de contrasena — Brom's"
 
     saludo = f"Hola <strong>{nombre}</strong>," if nombre else "Hola,"
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:20px;">
       <div style="background:linear-gradient(135deg,#2E7D32,#66BB6A);padding:24px;border-radius:14px;text-align:center;margin-bottom:24px;">
-        <h1 style="color:white;margin:0;font-size:22px;">🌿 Brom's</h1>
-        <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Recuperación de contraseña</p>
+        <h1 style="color:white;margin:0;font-size:22px;">Brom's</h1>
+        <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px;">Recuperacion de contrasena</p>
       </div>
       <p style="color:#333;">{saludo}</p>
       <p style="color:#555;font-size:14px;">
-        Recibimos una solicitud para restablecer tu contraseña.
-        Ingresa el siguiente código en la aplicación:
+        Recibimos una solicitud para restablecer tu contrasena.
+        Ingresa el siguiente codigo en la aplicacion:
       </p>
       <div style="background:#f5f9f5;border:2px solid #C8E6C9;border-radius:14px;padding:28px;text-align:center;margin:24px 0;">
         <div style="font-size:42px;font-weight:bold;letter-spacing:14px;color:#2E7D32;font-family:monospace;">
           {codigo}
         </div>
-        <p style="color:#888;margin:10px 0 0;font-size:12px;">Válido por {CODE_EXPIRE_MIN} minutos</p>
+        <p style="color:#888;margin:10px 0 0;font-size:12px;">Valido por {CODE_EXPIRE_MIN} minutos</p>
       </div>
       <p style="color:#999;font-size:12px;">
-        Si no solicitaste esto, ignora este correo. Tu contraseña no será modificada.
-      </p>
-      <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
-      <p style="color:#bbb;font-size:11px;text-align:center;">
-        Brom's · Correo automático, no respondas a este mensaje.
+        Si no solicitaste esto, ignora este correo. Tu contrasena no sera modificada.
       </p>
     </div>
     """
     msg.attach(MIMEText(html, "html"))
-
-    # Resend SMTP relay: host=smtp.resend.com, user="resend", pass=API_KEY
-    with smtplib.SMTP("smtp.resend.com", 587) as server:
-        server.starttls()
-        server.login("resend", RESEND_API_KEY)
-        server.sendmail(EMAIL_FROM, correo_destino, msg.as_string())
+    _enviar_smtp(msg, correo_destino)
 
 
 def solicitar_recuperacion(db: Session, correo: str) -> None:
     """
-    Genera un código de 6 dígitos, lo almacena con expiración de 10 minutos
-    y lo envía al correo del usuario.
-    Siempre responde igual para no revelar si el correo existe o no.
+    Genera un código de 6 dígitos, lo guarda en BD con expiración de 10 minutos
+    y lo envía al correo. Silencioso si el correo no existe.
     """
     registro, _ = buscar_por_correo(db, correo)
     if not registro:
-        return  # No revelar que el correo no existe
+        return  # no revelar
+
+    # Invalidar códigos anteriores del mismo correo
+    db.query(CodigoReset).filter(
+        CodigoReset.Correo == correo.lower(),
+        CodigoReset.Usado  == False,
+    ).update({"Usado": True})
 
     codigo = str(random.randint(100000, 999999))
-    _codigos_reset[correo.lower()] = {
-        "codigo":  codigo,
-        "expires": datetime.utcnow() + timedelta(minutes=CODE_EXPIRE_MIN),
-    }
+    db.add(CodigoReset(
+        Correo    = correo.lower(),
+        Codigo    = codigo,
+        Expira_En = datetime.utcnow() + timedelta(minutes=CODE_EXPIRE_MIN),
+        Usado     = False,
+    ))
+    db.commit()
 
     nombre = getattr(registro, "Nombre", "") or ""
     _enviar_email_codigo(correo, codigo, nombre)
 
 
 def verificar_codigo_recuperacion(db: Session, correo: str, codigo: str) -> str:
-    """
-    Valida el código. Si es correcto lo elimina (uso único)
-    y retorna un JWT de reset de 10 minutos.
-    """
-    key   = correo.lower()
-    entry = _codigos_reset.get(key)
+    """Valida el código desde BD. Si es correcto lo marca como usado y retorna JWT reset."""
+    entrada = (
+        db.query(CodigoReset)
+        .filter(
+            CodigoReset.Correo == correo.lower(),
+            CodigoReset.Usado  == False,
+        )
+        .order_by(CodigoReset.Expira_En.desc())
+        .first()
+    )
 
-    if not entry:
+    if not entrada:
         raise ValueError("No hay una solicitud activa para este correo. Solicita un nuevo código.")
 
-    if datetime.utcnow() > entry["expires"]:
-        _codigos_reset.pop(key, None)
+    if datetime.utcnow() > entrada.Expira_En:
+        entrada.Usado = True
+        db.commit()
         raise ValueError("El código ha expirado. Solicita uno nuevo.")
 
-    if entry["codigo"] != codigo.strip():
+    if entrada.Codigo != codigo.strip():
         raise ValueError("Código incorrecto. Verifica e intenta de nuevo.")
 
-    _codigos_reset.pop(key, None)   # consumir el código
-
-    registro, _ = buscar_por_correo(db, correo)
-    if not registro:
-        raise ValueError("Correo no encontrado.")
+    entrada.Usado = True
+    db.commit()
 
     return crear_reset_token(correo)
 

@@ -125,6 +125,16 @@ class VerificacionEmail(Base):
     usuario = relationship("Usuario", foreign_keys=[ID_Usuario])
 
 
+class CodigoReset(Base):
+    __tablename__ = "Codigos_Reset"
+
+    ID_Codigo = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    Correo    = Column(String(255), index=True)
+    Codigo    = Column(String(6))
+    Expira_En = Column(DateTime)
+    Usado     = Column(Boolean, default=False)
+
+
 # ─────────────────────────────────────────
 # CATEGORIAS
 # ─────────────────────────────────────────

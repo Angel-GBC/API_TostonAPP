@@ -98,6 +98,23 @@ def _migrar_columnas():
             except Exception as e:
                 print(f"[migración] Columna Comprobante_Pago ya es LONGTEXT o no se pudo modificar: {e}")
 
+    # Tabla de códigos de recuperación (reemplaza almacenamiento en memoria)
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS Codigos_Reset (
+                    ID_Codigo INT AUTO_INCREMENT PRIMARY KEY,
+                    Correo    VARCHAR(255),
+                    Codigo    VARCHAR(6),
+                    Expira_En DATETIME,
+                    Usado     TINYINT(1) DEFAULT 0
+                )
+            """))
+            conn.commit()
+            print("[migración] Tabla Codigos_Reset lista ✅")
+        except Exception as e:
+            print(f"[migración] Codigos_Reset: {e}")
+
 
 @app.get("/")
 def root():
