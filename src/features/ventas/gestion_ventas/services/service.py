@@ -71,6 +71,7 @@ def _formato_venta(venta: Venta, db: Session) -> dict:
         "productos":          productos,
         "tiene_domicilio":    domicilio is not None,
         "ID_Domicilio":       domicilio.ID_Domicilio if domicilio else None,
+        "comprobante_pago":   venta.Comprobante_Pago,
     }
 
 
@@ -277,12 +278,13 @@ def crear_venta(db: Session, datos: VentaCreate) -> dict:
     ESTADO_PENDIENTE = 1
 
     nueva_venta = Venta(
-        ID_Usuario   = datos.ID_Usuario,
-        Total        = subtotal_bruto,
-        Estado       = ESTADO_PENDIENTE,
-        Metodo_Pago  = datos.Metodo_Pago,
-        Fecha_Venta  = datetime.now(),
-        Fecha_pedido = datetime.now(),
+        ID_Usuario       = datos.ID_Usuario,
+        Total            = subtotal_bruto,
+        Estado           = ESTADO_PENDIENTE,
+        Metodo_Pago      = datos.Metodo_Pago,
+        Fecha_Venta      = datetime.now(),
+        Fecha_pedido     = datetime.now(),
+        Comprobante_Pago = datos.comprobante_pago,
     )
     db.add(nueva_venta)
     db.flush()

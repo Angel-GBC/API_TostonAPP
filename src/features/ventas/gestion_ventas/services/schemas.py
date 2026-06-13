@@ -22,13 +22,14 @@ class DomicilioVentaInput(BaseModel):
 
 # ── Crear venta ──
 class VentaCreate(BaseModel):
-    ID_Usuario:    int
-    Metodo_Pago:   str                              # "Efectivo", "Transferencia", "Contra entrega"
-    A_Nombre_De:   Optional[str]       = None       # para el detalle de venta
-    productos:     list[ProductoVentaInput]
-    codigo_descuento: Optional[str]    = None       # cupón ingresado por el cliente
-    usar_credito:  bool                = False      # si el cliente quiere usar su saldo
-    domicilio:     Optional[DomicilioVentaInput] = None
+    ID_Usuario:       int
+    Metodo_Pago:      str                              # "Efectivo", "Transferencia", "Contra entrega"
+    A_Nombre_De:      Optional[str]       = None
+    productos:        list[ProductoVentaInput]
+    codigo_descuento: Optional[str]       = None
+    usar_credito:     bool                = False
+    domicilio:        Optional[DomicilioVentaInput] = None
+    comprobante_pago: Optional[str]       = None       # base64 del comprobante (solo Transferencia)
 
 
 # ── Cambiar estado de venta ──
@@ -47,21 +48,22 @@ class ProductoVentaResponse(BaseModel):
 
 # ── Respuesta de una venta ──
 class VentaResponse(BaseModel):
-    ID_Venta:          int
-    ID_Usuario:        Optional[int]      = None
-    nombre_cliente:    Optional[str]      = None
-    Total:             Optional[Decimal]  = None
-    subtotal_bruto:    Optional[Decimal]  = None    # antes de crédito y descuento
-    credito_aplicado:  Optional[Decimal]  = None
-    descuento_aplicado: Optional[Decimal] = None
-    Estado:            Optional[int]      = None
-    estado_label:      Optional[str]      = None
-    Metodo_Pago:       Optional[str]      = None
-    Fecha_Venta:       Optional[datetime] = None
-    Fecha_pedido:      Optional[datetime] = None
-    productos:         list[ProductoVentaResponse] = []
-    tiene_domicilio:   bool               = False
-    ID_Domicilio:      Optional[int]      = None
+    ID_Venta:           int
+    ID_Usuario:         Optional[int]      = None
+    nombre_cliente:     Optional[str]      = None
+    Total:              Optional[Decimal]  = None
+    subtotal_bruto:     Optional[Decimal]  = None
+    credito_aplicado:   Optional[Decimal]  = None
+    descuento_aplicado: Optional[Decimal]  = None
+    Estado:             Optional[int]      = None
+    estado_label:       Optional[str]      = None
+    Metodo_Pago:        Optional[str]      = None
+    Fecha_Venta:        Optional[datetime] = None
+    Fecha_pedido:       Optional[datetime] = None
+    productos:          list[ProductoVentaResponse] = []
+    tiene_domicilio:    bool               = False
+    ID_Domicilio:       Optional[int]      = None
+    comprobante_pago:   Optional[str]      = None
 
     class Config:
         from_attributes = True

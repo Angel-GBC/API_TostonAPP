@@ -344,13 +344,14 @@ class OrdenProduccion(Base):
 class Venta(Base):
     __tablename__ = "Ventas"
 
-    ID_Venta     = Column(Integer, primary_key=True, index=True)
-    ID_Usuario   = Column(Integer, ForeignKey("Usuarios.ID_Usuario"))               # ← actualizado
-    Total        = Column(Numeric(30, 2))
-    Estado       = Column(Integer, ForeignKey("Estados.ID_Estados"))
-    Metodo_Pago  = Column(String(20))
-    Fecha_Venta  = Column(DateTime)
-    Fecha_pedido = Column(DateTime)
+    ID_Venta          = Column(Integer, primary_key=True, index=True)
+    ID_Usuario        = Column(Integer, ForeignKey("Usuarios.ID_Usuario"))
+    Total             = Column(Numeric(30, 2))
+    Estado            = Column(Integer, ForeignKey("Estados.ID_Estados"))
+    Metodo_Pago       = Column(String(20))
+    Fecha_Venta       = Column(DateTime)
+    Fecha_pedido      = Column(DateTime)
+    Comprobante_Pago  = Column(Text, nullable=True)
 
     usuario      = relationship("Usuario", back_populates="ventas")
     productos    = relationship("VentaXProducto", back_populates="venta")

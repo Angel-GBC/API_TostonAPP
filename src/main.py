@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from src.shared.services.database import engine
 
 # ── Auth ──
 from src.features.auth.services.router import router as auth_router
@@ -71,6 +73,19 @@ app.include_router(ventas_router,        prefix=PREFIX)
 app.include_router(devoluciones_router,  prefix=PREFIX)
 app.include_router(domicilios_router,    prefix=PREFIX)
 app.include_router(dashboard_router,     prefix=PREFIX)
+
+
+@app.on_event("startup")
+def _migrar_columnas():
+    """Agrega columnas nuevas a la BD si no existen (migraciones ligeras)."""
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "ALTER TABLE Ventas ADD COLUMN Comprobante_Pago LONGTEXT NULL"
+            ))
+            conn.commit()
+        except Exception:
+            pass  # La columna ya existe
 
 
 @app.get("/")
