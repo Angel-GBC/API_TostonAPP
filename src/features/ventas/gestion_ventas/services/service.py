@@ -239,6 +239,35 @@ def obtener_venta(db: Session, id_venta: int) -> dict:
     return _formato_venta(venta, db)
 
 
+def obtener_mi_venta(db: Session, id_venta: int, actual: dict) -> dict:
+    """Permite al cliente ver el detalle de una de sus propias ventas."""
+    if actual["tipo"] != "usuario":
+        raise HTTPException(status_code=403, detail="Solo disponible para clientes")
+    id_usuario = actual["registro"].ID_Usuario
+    venta = (
+        db.query(Venta)
+        .filter(Venta.ID_Venta == id_venta, Venta.ID_Usuario == id_usuario)
+        .first()
+    )
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    return _formato_venta(venta, db)
+
+
+def actualizar_venta(db: Session, id_venta: int, datos) -> dict:
+    """Permite al admin actualizar comprobante_pago y/o Metodo_Pago de una venta."""
+    venta = db.query(Venta).filter(Venta.ID_Venta == id_venta).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    if datos.comprobante_pago is not None:
+        venta.Comprobante_Pago = datos.comprobante_pago
+    if datos.Metodo_Pago is not None:
+        venta.Metodo_Pago = datos.Metodo_Pago
+    db.commit()
+    db.refresh(venta)
+    return _formato_venta(venta, db)
+
+
 def crear_venta(db: Session, datos: VentaCreate) -> dict:
     """
     Flujo completo de creación de venta:

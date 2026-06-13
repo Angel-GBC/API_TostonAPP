@@ -37,6 +37,12 @@ class VentaEstado(BaseModel):
     Estado: int
 
 
+# ── Editar venta (admin) ──
+class VentaUpdate(BaseModel):
+    comprobante_pago: Optional[str] = None   # base64 nuevo comprobante
+    Metodo_Pago:      Optional[str] = None   # cambiar método de pago
+
+
 # ── Respuesta de producto en venta ──
 class ProductoVentaResponse(BaseModel):
     ID_Producto:     int

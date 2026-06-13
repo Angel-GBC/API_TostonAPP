@@ -4,8 +4,8 @@ from typing import Optional
 
 from src.shared.services.database import get_db
 from src.features.auth.services.dependencies import requiere_permiso, obtener_usuario_actual
-from .schemas import VentaCreate, VentaEstado, VentaResponse, VentaListResponse
-from .service import obtener_ventas, obtener_venta, crear_venta, cambiar_estado, obtener_mis_ventas
+from .schemas import VentaCreate, VentaEstado, VentaUpdate, VentaResponse, VentaListResponse
+from .service import obtener_ventas, obtener_venta, crear_venta, cambiar_estado, obtener_mis_ventas, obtener_mi_venta, actualizar_venta
 
 router = APIRouter(prefix="/ventas", tags=["Gestión de Ventas"])
 
@@ -19,6 +19,16 @@ def mis_ventas(
 ):
     """Retorna las ventas del cliente autenticado (todos los estados)."""
     return obtener_mis_ventas(db, actual, pagina, por_pagina)
+
+
+@router.get("/mis-ventas/{id_venta}", response_model=VentaResponse)
+def ver_mi_venta(
+    id_venta: int,
+    db:       Session = Depends(get_db),
+    actual:   dict    = Depends(obtener_usuario_actual),
+):
+    """Retorna el detalle completo de una de las ventas del cliente autenticado."""
+    return obtener_mi_venta(db, id_venta, actual)
 
 
 @router.get("/", response_model=VentaListResponse)
@@ -60,6 +70,17 @@ def registrar_venta(
     5. Crea domicilio si se incluye en el body
     """
     return crear_venta(db, datos)
+
+
+@router.patch("/{id_venta}", response_model=VentaResponse)
+def editar_venta(
+    id_venta: int,
+    datos:    VentaUpdate,
+    db:       Session = Depends(get_db),
+    _:        dict    = Depends(requiere_permiso("editar_ventas"))
+):
+    """Permite al admin editar comprobante_pago y/o Metodo_Pago de una venta."""
+    return actualizar_venta(db, id_venta, datos)
 
 
 @router.patch("/{id_venta}/estado", response_model=VentaResponse)

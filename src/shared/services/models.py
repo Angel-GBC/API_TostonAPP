@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Boolean, Text
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -351,7 +352,7 @@ class Venta(Base):
     Metodo_Pago       = Column(String(20))
     Fecha_Venta       = Column(DateTime)
     Fecha_pedido      = Column(DateTime)
-    Comprobante_Pago  = Column(Text, nullable=True)
+    Comprobante_Pago  = Column(LONGTEXT, nullable=True)
 
     usuario      = relationship("Usuario", back_populates="ventas")
     productos    = relationship("VentaXProducto", back_populates="venta")

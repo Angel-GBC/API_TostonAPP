@@ -77,7 +77,7 @@ app.include_router(dashboard_router,     prefix=PREFIX)
 
 @app.on_event("startup")
 def _migrar_columnas():
-    """Agrega columnas nuevas a la BD si no existen (migraciones ligeras)."""
+    """Agrega o corrige columnas en la BD (migraciones ligeras)."""
     with engine.connect() as conn:
         try:
             conn.execute(text(
@@ -85,7 +85,14 @@ def _migrar_columnas():
             ))
             conn.commit()
         except Exception:
-            pass  # La columna ya existe
+            # La columna ya existe — asegurar que sea LONGTEXT (no TEXT de 64 KB)
+            try:
+                conn.execute(text(
+                    "ALTER TABLE Ventas MODIFY COLUMN Comprobante_Pago LONGTEXT NULL"
+                ))
+                conn.commit()
+            except Exception:
+                pass
 
 
 @app.get("/")
